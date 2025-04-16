@@ -18,16 +18,23 @@ const App = () => {
   const insets = useSafeAreaInsets();
   const windowHeight = Dimensions.get("window").height;
   const animatedPosition = useSharedValue(windowHeight);
-  const snapPoints = useMemo(() => [130, windowHeight], [windowHeight]);
+  const snapPoints = useMemo(() => [140, windowHeight], [windowHeight]);
 
   const initialBottomSheetHeight = snapPoints[0];
-  const fadeDistance = 50;
+  const fadeDistance = 20;
+  const collapseDistance = 20;
 
   const positionAtInitialHeight = windowHeight - initialBottomSheetHeight;
-  const positionAtFadeEnd =
-    windowHeight - (initialBottomSheetHeight + fadeDistance);
+  const positionAtFadeEnd = positionAtInitialHeight - fadeDistance;
+  const positionAtCollapseEnd = positionAtFadeEnd - collapseDistance;
+
   const titleAnimationEndPosition =
     positionAtInitialHeight - positionAtInitialHeight / 3;
+
+  const fadeStart = positionAtFadeEnd;
+  const fadeEnd = fadeStart + fadeDistance;
+  const collapseStart = fadeEnd;
+  const collapseEnd = collapseStart + collapseDistance;
 
   const animatedSessionCountStyle = useAnimatedStyle(() => {
     const opacity = interpolate(
@@ -92,6 +99,36 @@ const App = () => {
     };
   });
 
+  const animatedGridStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      animatedPosition.value,
+      [windowHeight - snapPoints[0], windowHeight - snapPoints[1]],
+      [0, 1],
+      Extrapolate.CLAMP
+    );
+    return { opacity };
+  });
+
+  const animatedSessionCountContainerStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      animatedPosition.value,
+      [positionAtFadeEnd, positionAtInitialHeight],
+      [0, 1],
+      Extrapolate.CLAMP
+    );
+    const height = interpolate(
+      animatedPosition.value,
+      [positionAtCollapseEnd, positionAtFadeEnd],
+      [0, 24],
+      Extrapolate.CLAMP
+    );
+    return {
+      opacity,
+      height,
+      overflow: "hidden",
+    };
+  });
+
   const CustomHandle = () => (
     <Animated.View style={animatedContentStyle}>
       <View
@@ -130,13 +167,11 @@ const App = () => {
           <Animated.Text style={[styles.title, animatedTitleStyle]}>
             This Week
           </Animated.Text>
-          <Animated.Text
-            style={[styles.sessionCount, animatedSessionCountStyle]}
-          >
-            10 sessions
-          </Animated.Text>
+          <Animated.View style={animatedSessionCountContainerStyle}>
+            <Text style={styles.sessionCount}>10 sessions</Text>
+          </Animated.View>
           {/* <Text style={styles.title}>My Sessions</Text> */}
-          <View style={styles.gridContainer}>
+          <Animated.View style={[styles.gridContainer, animatedGridStyle]}>
             <View style={styles.gridRow}>
               <ClassCard />
               <ClassCard />
@@ -145,7 +180,7 @@ const App = () => {
               <ClassCard />
               <ClassCard />
             </View>
-          </View>
+          </Animated.View>
         </BottomSheetView>
       </BottomSheet>
     </GestureHandlerRootView>
