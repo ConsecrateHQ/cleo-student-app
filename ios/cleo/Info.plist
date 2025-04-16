@@ -31,6 +31,12 @@
           <string>com.joshtrung.cleo</string>
         </array>
       </dict>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>com.googleusercontent.apps.48288193953-p05auhmbc3jblrm70dg19egbfaeiqto4</string>
+        </array>
+      </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
