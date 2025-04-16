@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+The app we are building is an attendance checking app that uses GPS to check whether students are attending class. We use Expo and React Native. Always use expo-routes for routing. Make sure to write the best code possible.

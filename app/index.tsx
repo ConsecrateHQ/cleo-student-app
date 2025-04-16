@@ -12,6 +12,7 @@ import Animated, {
   Extrapolate,
 } from "react-native-reanimated";
 import ClassCard from "../components/ClassCard";
+import LogoutButton from "../components/LogoutButton";
 
 const App = () => {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -181,6 +182,8 @@ const App = () => {
               <ClassCard />
             </View>
           </Animated.View>
+
+          <LogoutButton />
         </BottomSheetView>
       </BottomSheet>
     </GestureHandlerRootView>
