@@ -1,6 +1,5 @@
 import React from "react";
 import { TouchableOpacity, Text, StyleSheet } from "react-native";
-import { router } from "expo-router";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
 
@@ -9,7 +8,6 @@ const LogoutButton = () => {
 
   const handleLogout = () => {
     logout();
-    router.replace("/login");
   };
 
   return (

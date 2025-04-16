@@ -10,11 +10,13 @@ import {
 import { router } from "expo-router";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
+import { Ionicons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
+  const loginWithGoogle = useAuthStore((state) => state.loginWithGoogle);
 
   const handleLogin = () => {
     login();
@@ -34,7 +36,33 @@ export default function LoginScreen() {
           onPress={handleLogin}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>Let's Go</Text>
+          <Text style={styles.buttonText}>Bypass Login</Text>
+        </TouchableOpacity>
+
+        <View style={{ height: 20 }} />
+
+        <TouchableOpacity
+          style={[
+            styles.loginButton,
+            {
+              flexDirection: "row",
+              backgroundColor: "#fff",
+              borderWidth: 1,
+              borderColor: "#ccc",
+            },
+          ]}
+          onPress={loginWithGoogle}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="logo-google"
+            size={20}
+            color="#4285F4"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={[styles.buttonText, { color: "#4285F4" }]}>
+            Sign in with Google
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
