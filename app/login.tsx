@@ -11,12 +11,8 @@ import { router } from "expo-router";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
 import { Ionicons } from "@expo/vector-icons";
-import Svg, { Path } from "react-native-svg";
-import { LinearGradient } from "expo-linear-gradient";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
-const CIRCLE_SIZE = width * 2; // Large enough to cover the top
 
 export default function LoginScreen() {
   const login = useAuthStore((state) => state.login);
@@ -29,35 +25,6 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Decorative Circles (absolutely positioned, do not affect layout) */}
-      <View style={styles.circlesContainer} pointerEvents="none">
-        <LinearGradient
-          colors={["#4F8CFF", "#A259FF", "#F4845F", "#FFD600"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.gradientCircle}
-        />
-        <View style={styles.whiteCircle} />
-        <View style={styles.textOverlay}>
-          <MaterialCommunityIcons
-            name="star-four-points"
-            size={36}
-            color="#000"
-            style={{ position: "absolute", top: 10, left: 20 }}
-          />
-          <Text style={styles.bigTitle}>
-            Automagical{"\n"}Attendance{"\n"}Checking
-          </Text>
-          <MaterialCommunityIcons
-            name="wand"
-            size={36}
-            color="#000"
-            style={{ position: "absolute", bottom: 10, right: 20 }}
-          />
-        </View>
-      </View>
-
-      {/* Main Content (not overlapped by circles) */}
       <View style={styles.content}>
         <Text style={styles.title}>HalloCleo</Text>
         <Text style={styles.subtitle}>Student Attendance</Text>
@@ -105,60 +72,15 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f4f4f4",
+    backgroundColor: theme.colors.background.app,
     alignItems: "center",
-    justifyContent: "flex-start",
-  },
-  circlesContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: 260,
-    zIndex: 1,
-    alignItems: "center",
-    justifyContent: "flex-start",
-    overflow: "visible",
-  },
-  gradientCircle: {
-    position: "absolute",
-    top: 80,
-    left: -(CIRCLE_SIZE - width) / 2,
-    width: CIRCLE_SIZE,
-    height: CIRCLE_SIZE,
-    borderRadius: CIRCLE_SIZE / 2,
-    zIndex: 1,
-  },
-  whiteCircle: {
-    position: "absolute",
-    top: 0,
-    left: -(CIRCLE_SIZE - width) / 2,
-    width: CIRCLE_SIZE,
-    height: CIRCLE_SIZE,
-    borderRadius: CIRCLE_SIZE / 2,
-    backgroundColor: "#fff",
-    zIndex: 2,
-  },
-  textOverlay: {
-    position: "absolute",
-    top: 60,
-    left: 0,
-    width: "100%",
-    alignItems: "center",
-    zIndex: 3,
-  },
-  bigTitle: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#111",
-    textAlign: "center",
-    marginVertical: 20,
+    justifyContent: "center",
+    padding: 20,
   },
   content: {
     width: "100%",
     maxWidth: 400,
     alignItems: "center",
-    marginTop: 260, // Push content below the circles
   },
   title: {
     fontSize: 42,

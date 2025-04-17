@@ -10,21 +10,58 @@ const useEmulator = __DEV__;
 // For iOS simulators, use 'localhost'
 // For Android emulators, use '10.0.2.2' or your machine's actual IP
 const getEmulatorHost = () => {
-  return Platform.OS === "ios" ? "localhost" : "10.0.2.2";
+  const host = Platform.OS === "ios" ? "localhost" : "10.0.2.2";
+  console.log(
+    `[FirebaseConfig] Determined emulator host for ${Platform.OS}: ${host}`
+  );
+  return host;
 };
 
 /**
  * Initialize Firebase services with emulators if in development
  */
 export const initializeFirebase = () => {
+  console.log(
+    `[FirebaseConfig] initializeFirebase called. __DEV__ is ${__DEV__}`
+  );
   if (useEmulator) {
-    console.log("🔥 Using Firebase emulators");
+    const host = getEmulatorHost();
+    const firestorePort = 8082;
+    const authPort = 9099;
 
-    // Connect to Auth emulator
-    auth().useEmulator(`http://${getEmulatorHost()}:9099`);
+    console.log(`[FirebaseConfig] 🔥 Using Firebase emulators. Host: ${host}`);
 
-    // Connect to Firestore emulator
-    firestore().useEmulator(getEmulatorHost(), 8081);
+    try {
+      console.log(
+        `[FirebaseConfig]   -> Connecting to Firestore emulator at ${host}:${firestorePort}...`
+      );
+      firestore().useEmulator(host, firestorePort);
+      console.log(
+        "[FirebaseConfig]   ✅ Firestore emulator connection configured."
+      );
+    } catch (e) {
+      console.error(
+        "[FirebaseConfig]   ❌ Error configuring Firestore emulator:",
+        e
+      );
+    }
+
+    try {
+      console.log(
+        `[FirebaseConfig]   -> Connecting to Auth emulator at http://${host}:${authPort}...`
+      );
+      auth().useEmulator(`http://${host}:${authPort}`);
+      console.log("[FirebaseConfig]   ✅ Auth emulator connection configured.");
+    } catch (e) {
+      console.error(
+        "[FirebaseConfig]   ❌ Error configuring Auth emulator:",
+        e
+      );
+    }
+  } else {
+    console.log(
+      "[FirebaseConfig] Not using emulators (production mode or __DEV__ is false)."
+    );
   }
 };
 
