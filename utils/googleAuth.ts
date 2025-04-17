@@ -4,7 +4,7 @@ import {
   isErrorWithCode,
 } from "@react-native-google-signin/google-signin";
 // Re-import FirebaseAuthTypes for the UserCredential type
-import auth, { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import { FirebaseAuthTypes } from "@react-native-firebase/auth";
 // Use modular imports from @react-native-firebase/auth for functions
 import {
   getAuth,
@@ -12,6 +12,7 @@ import {
   GoogleAuthProvider,
   signOut as firebaseSignOut, // Alias signOut to avoid naming conflict
 } from "@react-native-firebase/auth";
+import { app } from "./firebaseConfig"; // Import shared app instance
 
 // Configure Google Sign In - Call this once at app startup
 // Using 'autoDetect' assumes you have firebase config files setup correctly
@@ -25,7 +26,7 @@ GoogleSignin.configure({
 export const signInWithGoogle =
   async (): Promise<FirebaseAuthTypes.UserCredential | null> => {
     // Get the auth instance using the modular API
-    const authInstance = getAuth();
+    const authInstance = getAuth(app); // Use imported app
     try {
       // Check if device has Google Play Services installed & up-to-date
       // Recommended for Android
@@ -88,13 +89,33 @@ export const signInWithGoogle =
 // Sign out function
 export const signOut = async () => {
   // Get the auth instance using the modular API
-  const authInstance = getAuth();
+  const authInstance = getAuth(app); // Use imported app
   try {
-    await GoogleSignin.revokeAccess(); // Revoke Google access
-    await GoogleSignin.signOut(); // Sign out from Google
+    try {
+      // Try Google signout operations, but don't fail if they error in DEV mode
+      await GoogleSignin.revokeAccess(); // Revoke Google access
+      await GoogleSignin.signOut(); // Sign out from Google
+    } catch (googleError) {
+      if (!__DEV__) {
+        console.error("Google Sign Out Error:", googleError);
+        throw googleError; // Re-throw in production
+      } else {
+        console.log(
+          "DEV mode: Google sign-out encountered an issue, but continuing with Firebase signout."
+        );
+      }
+    }
+
+    // Always attempt Firebase signout
     await firebaseSignOut(authInstance); // Sign out from Firebase using the modular API
     console.log("User signed out successfully!");
   } catch (error) {
-    console.error("Sign Out Error:", error);
+    console.error("Firebase Sign Out Error:", error);
+    if (__DEV__) {
+      // In DEV mode, we'll consider this a "successful" logout even if it fails
+      console.log("DEV mode: Ignoring Firebase signout error");
+    } else {
+      throw error; // Re-throw in production
+    }
   }
 };

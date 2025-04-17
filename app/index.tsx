@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   Modal,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
@@ -30,8 +31,10 @@ import LogoutButton from "../components/LogoutButton";
 import DevMenu from "../components/DevMenu";
 import { Ionicons } from "@expo/vector-icons";
 import useAuthStore from "../hooks/useAuthStore";
-import useFirestoreStore from "../hooks/useFirestoreStore";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useUserClasses } from "../hooks/useUserClasses";
+import * as Location from "expo-location";
+import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 
 const App = () => {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -173,43 +176,44 @@ const App = () => {
 
   const user = useAuthStore((state) => state.user);
   const [devMenuVisible, setDevMenuVisible] = useState(false);
+  const { classes: currentUserClasses, loading: isLoadingUserClasses } =
+    useUserClasses(user?.uid);
 
-  // Firestore store hooks
-  const {
-    currentUserClasses,
-    isLoadingUserClasses,
-    fetchUserClasses,
-    sessions,
-    fetchClassSessions,
-    isLoadingSessions,
-  } = useFirestoreStore();
+  // State for location
+  const [location, setLocation] = useState<Location.LocationObject | null>(
+    null
+  );
+  const [locationErrorMsg, setLocationErrorMsg] = useState<string | null>(null);
+  const [isLocationLoading, setIsLocationLoading] = useState(true);
 
-  // Fetch user classes on login
+  // Effect for location fetching
   useEffect(() => {
-    if (user) {
-      fetchUserClasses(user.uid);
-    }
-  }, [user]);
-
-  // Fetch sessions for all classes (for active session check)
-  useEffect(() => {
-    if (user && currentUserClasses.length > 0) {
-      currentUserClasses.forEach((cls) => {
-        fetchClassSessions(cls.classId);
-      });
-    }
-  }, [user, currentUserClasses]);
-
-  // Helper: Map classId to its active session (if any)
-  const classActiveSessionMap = useMemo(() => {
-    const map: Record<string, boolean> = {};
-    sessions.forEach((session) => {
-      if (session.status === "active") {
-        map[session.classId] = true;
+    (async () => {
+      setIsLocationLoading(true);
+      setLocationErrorMsg(null);
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setLocationErrorMsg(
+          "Permission to access location was denied. Please enable it in settings."
+        );
+        setIsLocationLoading(false);
+        return;
       }
-    });
-    return map;
-  }, [sessions]);
+
+      try {
+        let currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation, // Highest accuracy
+        });
+        setLocation(currentLocation);
+        console.log("Fetched Location:", currentLocation.coords);
+      } catch (error) {
+        console.error("Error fetching location:", error);
+        setLocationErrorMsg("Failed to fetch location.");
+      } finally {
+        setIsLocationLoading(false);
+      }
+    })();
+  }, []);
 
   console.log("Is DEV mode?", __DEV__);
 
@@ -249,17 +253,84 @@ const App = () => {
             ) : (
               currentUserClasses.map((cls) => (
                 <View key={cls.classId} style={styles.classCardRow}>
-                  <ClassCard classData={cls} />
-                  {classActiveSessionMap[cls.classId] && (
-                    <View style={styles.activeBadge}>
-                      <Text style={styles.activeBadgeText}>Active Session</Text>
-                    </View>
-                  )}
+                  <View style={styles.classTextContainer}>
+                    <Text style={styles.classNameText}>{cls.className}</Text>
+                    {cls.teacherName && (
+                      <Text style={styles.teacherNameText}>
+                        Teacher: {cls.teacherName}
+                      </Text>
+                    )}
+                    {cls.joinCode && (
+                      <Text style={styles.infoText}>
+                        Join Code:{" "}
+                        <Text style={styles.highlightText}>{cls.joinCode}</Text>
+                      </Text>
+                    )}
+                    {cls.hasActiveSession && (
+                      <View style={styles.activeSessionContainer}>
+                        <View style={styles.activeBadge}>
+                          <Text style={styles.activeBadgeText}>
+                            Active Session
+                          </Text>
+                        </View>
+                        {cls.location && (
+                          <Text style={styles.locationText}>
+                            Location: {cls.location.latitude.toFixed(4)},{" "}
+                            {cls.location.longitude.toFixed(4)}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </View>
                 </View>
               ))
             )}
           </View>
         )}
+
+        {/* My Location Section */}
+        <View style={styles.locationContainer}>
+          <Text style={styles.sectionTitle}>My Location</Text>
+          {isLocationLoading ? (
+            <ActivityIndicator
+              color={theme.colors.button.primary}
+              size="large"
+            />
+          ) : locationErrorMsg ? (
+            <Text style={styles.errorText}>{locationErrorMsg}</Text>
+          ) : location ? (
+            <>
+              <Text style={styles.coordinateText}>
+                Latitude: {location.coords.latitude.toFixed(6)}
+              </Text>
+              <Text style={styles.coordinateText}>
+                Longitude: {location.coords.longitude.toFixed(6)}
+              </Text>
+              <MapView
+                style={styles.map}
+                initialRegion={{
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.005, // Zoom level
+                  longitudeDelta: 0.005, // Zoom level
+                }}
+                showsUserLocation={false} // We'll use a marker instead
+                scrollEnabled={false} // Disable scroll for a static view
+                zoomEnabled={false} // Disable zoom
+              >
+                <Marker
+                  coordinate={{
+                    latitude: location.coords.latitude,
+                    longitude: location.coords.longitude,
+                  }}
+                  title="Your Location"
+                />
+              </MapView>
+            </>
+          ) : (
+            <Text style={styles.emptyText}>Location data not available.</Text>
+          )}
+        </View>
 
         <BottomSheet
           ref={bottomSheetRef}
@@ -448,7 +519,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 4,
     paddingHorizontal: 10,
-    marginLeft: 10,
+    marginRight: 10,
+    marginVertical: 6,
   },
   activeBadgeText: {
     color: "#fff",
@@ -477,6 +549,73 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: theme.colors.text.secondary,
     marginBottom: 1,
+  },
+  classTextContainer: {
+    flexDirection: "column",
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    flex: 1,
+  },
+  classNameText: {
+    fontSize: 17,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 2,
+  },
+  teacherNameText: {
+    fontSize: 14,
+    color: theme.colors.text.secondary,
+  },
+  infoText: {
+    fontSize: 14,
+    color: theme.colors.text.secondary,
+    marginTop: 2,
+  },
+  highlightText: {
+    fontWeight: "bold",
+    color: "#3949ab",
+  },
+  activeSessionContainer: {
+    marginTop: 8,
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
+  locationText: {
+    fontSize: 13,
+    color: theme.colors.text.secondary,
+    marginTop: 4,
+  },
+  locationContainer: {
+    width: "100%",
+    paddingHorizontal: 24,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  map: {
+    width: "100%",
+    height: 200, // Adjust height as needed
+    borderRadius: 10,
+    overflow: "hidden", // Ensure map corners are rounded
+    marginTop: 8,
+  },
+  errorText: {
+    color: theme.colors.status.error, // Use status.error color from theme
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 16,
+  },
+  coordinateText: {
+    fontSize: 14,
+    color: theme.colors.text.secondary,
+    marginBottom: 4,
+    fontFamily: Platform.OS === "ios" ? "Courier New" : "monospace", // Use monospace font
   },
 });
 

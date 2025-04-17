@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, ComponentProps } from "react";
 import {
   View,
   Text,
@@ -8,92 +8,130 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import { seedEmulator, clearEmulatorData } from "../utils/seedEmulator";
 import { Ionicons } from "@expo/vector-icons";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
-import firestore from "@react-native-firebase/firestore";
+import LocationPermissionButton from "./LocationPermissionButton";
+import firestore, {
+  FirebaseFirestoreTypes,
+} from "@react-native-firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  setDoc,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  updateDoc,
+  Timestamp,
+  GeoPoint,
+  limit,
+} from "@react-native-firebase/firestore";
 
 interface DevMenuProps {
   visible: boolean;
   onClose: () => void;
 }
 
+interface ActionButtonProps {
+  icon: ComponentProps<typeof Ionicons>["name"];
+  text: string;
+  onPress: () => void;
+  isLoading: boolean;
+  loadingText?: string;
+  disabled?: boolean;
+}
+
 export default function DevMenu({ visible, onClose }: DevMenuProps) {
   const user = useAuthStore((state) => state.user);
-  const [isLoading, setIsLoading] = useState<{ [key: string]: boolean }>({
+  const [isLoading, setIsLoading] = useState<{
+    [key: string]: boolean;
+  }>({
     seed: false,
     clear: false,
     addUser: false,
     deactivate: false,
-    activate: false,
+    start: false,
   });
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentClassId, setCurrentClassId] = useState<string | null>(null);
 
   // Hardcoded sample class and session IDs (should match your seeding logic)
   const SAMPLE_CLASS_NAME = "Computer Science 101";
 
   const handleSeedEmulator = async () => {
     try {
-      setIsLoading({ ...isLoading, seed: true });
+      setIsLoading((prev) => ({ ...prev, seed: true }));
       console.log("Starting seed operation...");
       await seedEmulator();
       console.log("Seed operation completed successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error in handleSeedEmulator:", error);
-      alert(`Error seeding emulator: ${error.message || error}`);
+      Alert.alert(
+        "Seeding Error",
+        `Error seeding emulator: ${error?.message || String(error)}`
+      );
     } finally {
-      setIsLoading({ ...isLoading, seed: false });
+      setIsLoading((prev) => ({ ...prev, seed: false }));
     }
   };
 
   const handleClearEmulator = async () => {
     try {
-      setIsLoading({ ...isLoading, clear: true });
+      setIsLoading((prev) => ({ ...prev, clear: true }));
       console.log("Starting clear operation...");
       await clearEmulatorData();
       console.log("Clear operation completed successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error in handleClearEmulator:", error);
-      alert(`Error clearing emulator data: ${error.message || error}`);
+      Alert.alert(
+        "Clearing Error",
+        `Error clearing emulator data: ${error?.message || String(error)}`
+      );
     } finally {
-      setIsLoading({ ...isLoading, clear: false });
+      setIsLoading((prev) => ({ ...prev, clear: false }));
     }
   };
 
   const handleAddCurrentUserToClass = async () => {
     try {
-      setIsLoading({ ...isLoading, addUser: true });
+      setIsLoading((prev) => ({ ...prev, addUser: true }));
 
       if (!user) {
-        alert("No user logged in");
+        Alert.alert("No User", "No user logged in");
         return;
       }
 
       // 1. Ensure user exists in 'users' collection
-      const userRef = firestore().collection("users").doc(user.uid);
-      const userSnap = await userRef.get();
+      const userRef = doc(firestore(), "users", user.uid);
+      const userSnap = await getDoc(userRef);
       if (!userSnap.exists) {
-        // You can customize these fields as needed
-        await userRef.set({
+        await setDoc(userRef, {
           uid: user.uid,
           email: user.email || "",
           displayName: user.displayName || "Unnamed User",
           role: "student",
-          created_at: firestore.Timestamp.now(),
+          created_at: Timestamp.now(),
         });
         console.log(`Created user document for ${user.uid}`);
       }
 
       console.log("Finding sample class...");
-      // Find the sample class
-      const classSnap = await firestore()
-        .collection("classes")
-        .where("name", "==", SAMPLE_CLASS_NAME)
-        .limit(1)
-        .get();
+      const classesRef = collection(firestore(), "classes");
+      const q = query(
+        classesRef,
+        where("name", "==", SAMPLE_CLASS_NAME),
+        limit(1)
+      );
+      const classSnap = await getDocs(q);
+
       if (classSnap.empty) {
-        alert("Sample class not found");
+        Alert.alert("Class Not Found", "Sample class not found");
         return;
       }
       const classDoc = classSnap.docs[0];
@@ -101,99 +139,171 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       const classData = classDoc.data();
 
       console.log(`Adding user ${user.uid} to class ${classId}...`);
-      // Add user to class students subcollection
-      await firestore()
-        .collection("classes")
-        .doc(classId)
-        .collection("students")
-        .doc(user.uid)
-        .set({
-          joinDate: firestore.Timestamp.now(),
-        });
+      const studentRef = doc(
+        firestore(),
+        "classes",
+        classId,
+        "students",
+        user.uid
+      );
+      await setDoc(studentRef, { joinDate: Timestamp.now() });
 
-      // Add class to user's userClasses
-      await firestore()
-        .collection("userClasses")
-        .doc(user.uid)
-        .collection("classes")
-        .doc(classId)
-        .set({
-          className: classData.name,
-          teacherName: "Professor Smith",
-          joinDate: firestore.Timestamp.now(),
-        });
+      const userClassRef = doc(
+        firestore(),
+        "userClasses",
+        user.uid,
+        "classes",
+        classId
+      );
+      await setDoc(userClassRef, {
+        className: classData.name,
+        teacherName: classData.teacherName || "Unknown Teacher", // Assuming teacherName exists
+        joinDate: Timestamp.now(),
+      });
 
-      alert("User added to class!");
-    } catch (error) {
+      Alert.alert("Success", "User added to class!");
+    } catch (error: any) {
       console.error("Error in handleAddCurrentUserToClass:", error);
-      alert(`Error adding user to class: ${error.message || error}`);
+      Alert.alert(
+        "Adding Error",
+        `Error adding user to class: ${error?.message || String(error)}`
+      );
     } finally {
-      setIsLoading({ ...isLoading, addUser: false });
+      setIsLoading((prev) => ({ ...prev, addUser: false }));
     }
   };
 
-  // Helper to get the current session for the sample class
-  const getSampleSessionDoc = async () => {
-    console.log("Looking for sample session...");
-    const classSnap = await firestore()
-      .collection("classes")
-      .where("name", "==", SAMPLE_CLASS_NAME)
-      .limit(1)
-      .get();
-    if (classSnap.empty) {
-      console.log("No sample class found");
-      return null;
+  // Helper to get the *active* session for the sample class
+  const getSampleActiveSessionDocRef =
+    async (): Promise<FirebaseFirestoreTypes.DocumentReference | null> => {
+      console.log("Looking for sample class...");
+      const classesRef = collection(firestore(), "classes");
+      const classQuery = query(
+        classesRef,
+        where("name", "==", SAMPLE_CLASS_NAME),
+        limit(1)
+      );
+      const classSnap = await getDocs(classQuery);
+
+      if (classSnap.empty) {
+        console.log("No sample class found");
+        setCurrentClassId(null);
+        setCurrentSessionId(null);
+        return null;
+      }
+      const classId = classSnap.docs[0].id;
+      setCurrentClassId(classId);
+      console.log(
+        `Found class with ID: ${classId}, looking for ACTIVE session...`
+      );
+      const sessionsRef = collection(firestore(), "sessions");
+      const sessionQuery = query(
+        sessionsRef,
+        where("classId", "==", classId),
+        where("status", "==", "active"),
+        limit(1)
+      );
+      const sessionSnap = await getDocs(sessionQuery);
+
+      if (sessionSnap.empty) {
+        console.log("No active session found for this class");
+        setCurrentSessionId(null);
+        return null;
+      }
+      const sessionId = sessionSnap.docs[0].id;
+      console.log(`Found active session with ID: ${sessionId}`);
+      setCurrentSessionId(sessionId);
+      return sessionSnap.docs[0].ref;
+    };
+
+  // Run check on component mount and when menu opens
+  useEffect(() => {
+    if (visible) {
+      getSampleActiveSessionDocRef();
     }
-    const classId = classSnap.docs[0].id;
-    console.log(`Found class with ID: ${classId}, looking for session...`);
-    const sessionSnap = await firestore()
-      .collection("sessions")
-      .where("classId", "==", classId)
-      .limit(1)
-      .get();
-    if (sessionSnap.empty) {
-      console.log("No session found for this class");
-      return null;
-    }
-    console.log(`Found session with ID: ${sessionSnap.docs[0].id}`);
-    return sessionSnap.docs[0].ref;
-  };
+  }, [visible]);
 
   const handleDeactivateSession = async () => {
     try {
-      setIsLoading({ ...isLoading, deactivate: true });
-      const sessionRef = await getSampleSessionDoc();
+      setIsLoading((prev) => ({ ...prev, deactivate: true }));
+      const sessionRef = await getSampleActiveSessionDocRef(); // Re-check which session is active
       if (!sessionRef) {
-        alert("Session not found");
+        Alert.alert(
+          "No Active Session",
+          "No active session found to deactivate."
+        );
         return;
       }
       console.log(`Deactivating session: ${sessionRef.id}...`);
-      await sessionRef.update({ status: "ended" });
-      alert("Session deactivated (ended)");
-    } catch (error) {
+      await updateDoc(sessionRef, {
+        status: "ended",
+        endTime: Timestamp.now(),
+      });
+      setCurrentSessionId(null); // Clear current session ID
+      Alert.alert("Success", "Session deactivated (ended)");
+    } catch (error: any) {
       console.error("Error in handleDeactivateSession:", error);
-      alert(`Error deactivating session: ${error.message || error}`);
+      Alert.alert(
+        "Deactivation Error",
+        `Error deactivating session: ${error?.message || String(error)}`
+      );
     } finally {
-      setIsLoading({ ...isLoading, deactivate: false });
+      setIsLoading((prev) => ({ ...prev, deactivate: false }));
     }
   };
 
-  const handleActivateSession = async () => {
+  const handleStartNewSession = async () => {
+    if (!user) {
+      Alert.alert("No User", "Cannot start session without logged in user.");
+      return;
+    }
+    if (!currentClassId) {
+      Alert.alert("No Class", "Cannot start session, sample class not found.");
+      // Attempt to find it again
+      await getSampleActiveSessionDocRef();
+      if (!currentClassId) return;
+    }
+
+    // Check if there's already an active session before creating a new one
+    const existingActiveSession = await getSampleActiveSessionDocRef();
+    if (existingActiveSession) {
+      Alert.alert(
+        "Session Active",
+        "An active session already exists for this class. Deactivate it first."
+      );
+      return;
+    }
+
     try {
-      setIsLoading({ ...isLoading, activate: true });
-      const sessionRef = await getSampleSessionDoc();
-      if (!sessionRef) {
-        alert("Session not found");
-        return;
-      }
-      console.log(`Activating session: ${sessionRef.id}...`);
-      await sessionRef.update({ status: "active" });
-      alert("Session activated");
-    } catch (error) {
-      console.error("Error in handleActivateSession:", error);
-      alert(`Error activating session: ${error.message || error}`);
+      setIsLoading((prev) => ({ ...prev, start: true }));
+      console.log(`Starting new session for class ${currentClassId}...`);
+
+      // Define new session data (customize location/radius as needed)
+      const newSessionData = {
+        classId: currentClassId,
+        teacherId: user.uid, // Assuming the current user is the teacher for dev purposes
+        startTime: Timestamp.now(),
+        endTime: null,
+        status: "active",
+        location: new GeoPoint(34.0522, -118.2437), // Example: Los Angeles
+        radius: 100, // Example: 100 meters
+        created_at: Timestamp.now(),
+      };
+
+      const sessionsCollectionRef = collection(firestore(), "sessions");
+      const newSessionRef = await addDoc(sessionsCollectionRef, newSessionData);
+
+      console.log(`New session started with ID: ${newSessionRef.id}`);
+      setCurrentSessionId(newSessionRef.id);
+      Alert.alert("Success", "New session started!");
+    } catch (error: any) {
+      console.error("Error in handleStartNewSession:", error);
+      Alert.alert(
+        "Starting Error",
+        `Error starting new session: ${error?.message || String(error)}`
+      );
     } finally {
-      setIsLoading({ ...isLoading, activate: false });
+      setIsLoading((prev) => ({ ...prev, start: false }));
     }
   };
 
@@ -204,11 +314,12 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
     onPress,
     isLoading,
     loadingText = "Processing...",
-  }) => (
+    disabled = false,
+  }: ActionButtonProps) => (
     <TouchableOpacity
-      style={[styles.button, isLoading && styles.buttonDisabled]}
+      style={[styles.button, (isLoading || disabled) && styles.buttonDisabled]}
       onPress={onPress}
-      disabled={isLoading}
+      disabled={isLoading || disabled}
     >
       {isLoading ? (
         <>
@@ -248,7 +359,9 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
             <Text style={styles.sectionTitle}>Firebase Emulators</Text>
 
             <Text style={styles.emulatorInfo}>
-              Status: Using emulator at http://127.0.0.1:4000/firestore
+              Status: Using emulator ({firestore().app.name}) at http://
+              {firestore().app.options.settings?.host}:
+              {firestore().app.options.settings?.port}/firestore
             </Text>
 
             <ActionButton
@@ -280,28 +393,46 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
               loadingText="Nuking database..."
             />
 
+            <LocationPermissionButton />
+
             <ActionButton
               icon="person-add-outline"
               text="Add Current User to Class"
               onPress={handleAddCurrentUserToClass}
               isLoading={isLoading.addUser}
               loadingText="Adding user..."
+              disabled={!user}
+            />
+
+            <Text style={styles.sectionTitle}>
+              Sample Class Session Control
+            </Text>
+            <Text style={styles.infoText}>
+              Controls the session for "{SAMPLE_CLASS_NAME}".
+              {currentClassId
+                ? ` (Class ID: ${currentClassId})`
+                : " (Class not found)"}
+              {currentSessionId
+                ? `\nCurrent Active Session ID: ${currentSessionId}`
+                : "\nNo active session detected."}
+            </Text>
+
+            <ActionButton
+              icon="play-circle-outline"
+              text="Start New Session"
+              onPress={handleStartNewSession}
+              isLoading={isLoading.start}
+              loadingText="Starting..."
+              disabled={!user || !currentClassId || !!currentSessionId} // Disable if no user, no class, or session already active
             />
 
             <ActionButton
               icon="pause-circle-outline"
-              text="Deactivate Session"
+              text="Deactivate Current Session"
               onPress={handleDeactivateSession}
               isLoading={isLoading.deactivate}
               loadingText="Deactivating..."
-            />
-
-            <ActionButton
-              icon="play-circle-outline"
-              text="Activate Session"
-              onPress={handleActivateSession}
-              isLoading={isLoading.activate}
-              loadingText="Activating..."
+              disabled={!currentSessionId} // Disable if no active session detected
             />
 
             <Text style={styles.infoText}>
@@ -359,7 +490,8 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
-    marginBottom: 16,
+    marginBottom: 8,
+    marginTop: 16, // Added margin top
     color: theme.colors.text.primary,
   },
   emulatorInfo: {
@@ -368,7 +500,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0f8ff",
     borderRadius: 8,
     color: theme.colors.text.secondary,
-    fontFamily: "Courier",
+    fontFamily: Platform.OS === "ios" ? "Courier New" : "monospace",
+    fontSize: 12,
   },
   button: {
     backgroundColor: theme.colors.button.primary,
@@ -377,6 +510,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center", // Center content in button
   },
   buttonDisabled: {
     backgroundColor: theme.colors.button.primary + "99", // Adding transparency
@@ -387,10 +521,11 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   infoText: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 4, // Reduced margin top
+    marginBottom: 12, // Increased margin bottom
     color: theme.colors.text.secondary,
     lineHeight: 20,
+    fontSize: 13,
   },
   codeBlock: {
     backgroundColor: "#f1f1f1",
@@ -399,7 +534,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   code: {
-    fontFamily: "Courier",
+    fontFamily: Platform.OS === "ios" ? "Courier New" : "monospace",
     color: "#c41a16",
+    fontSize: 13,
   },
 });

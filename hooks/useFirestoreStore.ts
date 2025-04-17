@@ -1,8 +1,22 @@
 import { create } from "zustand";
-import { getFirestore, createConverter } from "../utils/firebaseConfig";
-import firestore, {
-  FirebaseFirestoreTypes,
+import { createConverter } from "../utils/firebaseConfig";
+// Updated imports for v9+ modular syntax
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  Timestamp,
+  writeBatch,
+  getFirestore,
 } from "@react-native-firebase/firestore";
+// Import necessary types directly from the namespace
+import type { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
+import { app } from "../utils/firebaseConfig"; // Import shared app instance
 
 // Types based on the database schema from the .cursor/rules/database.mdc
 export interface User {
@@ -10,7 +24,8 @@ export interface User {
   email: string;
   displayName: string;
   role: "teacher" | "student";
-  created_at: FirebaseFirestoreTypes.Timestamp;
+  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
+  joinCode?: string;
 }
 
 export interface Class {
@@ -18,47 +33,44 @@ export interface Class {
   name: string;
   teacherId: string;
   joinCode?: string;
-  created_at: FirebaseFirestoreTypes.Timestamp;
+  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
 }
 
 export interface Session {
   sessionId: string;
   classId: string;
   teacherId: string;
-  startTime: FirebaseFirestoreTypes.Timestamp;
-  endTime: FirebaseFirestoreTypes.Timestamp | null;
+  startTime: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
+  endTime: FirebaseFirestoreTypes.Timestamp | null; // Or Timestamp
   status: "scheduled" | "active" | "ended" | "cancelled";
-  location: FirebaseFirestoreTypes.GeoPoint;
+  location: FirebaseFirestoreTypes.GeoPoint; // Use namespace directly
   radius: number;
-  created_at: FirebaseFirestoreTypes.Timestamp;
+  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
 }
 
-// Type converters for Firestore
+// Type converters for Firestore (defined but not used on collections directly)
 const userConverter = createConverter<User>();
 const classConverter = createConverter<Class>();
 const sessionConverter = createConverter<Session>();
 
-// Collection references with proper type casting
-const usersCollection = () =>
-  getFirestore()
-    .collection("users")
-    .withConverter(
-      userConverter
-    ) as FirebaseFirestoreTypes.CollectionReference<User>;
+// Collection references WITHOUT withConverter
+const usersCollection = () => {
+  return collection(getFirestore(app), "users");
+};
 
-const classesCollection = () =>
-  getFirestore()
-    .collection("classes")
-    .withConverter(
-      classConverter
-    ) as FirebaseFirestoreTypes.CollectionReference<Class>;
+const classesCollection = () => {
+  return collection(getFirestore(app), "classes");
+};
 
-const sessionsCollection = () =>
-  getFirestore()
-    .collection("sessions")
-    .withConverter(
-      sessionConverter
-    ) as FirebaseFirestoreTypes.CollectionReference<Session>;
+const sessionsCollection = () => {
+  return collection(getFirestore(app), "sessions");
+};
+
+// Get a typed reference to a specific user's classes subcollection
+// No converter needed here as we often just store IDs or simple data
+const userSpecificClassesCollection = (userId: string) => {
+  return collection(getFirestore(app), `userClasses/${userId}/classes`);
+};
 
 // Store interface
 interface FirestoreState {
@@ -82,7 +94,7 @@ interface FirestoreState {
   fetchUserClasses: (userId: string) => Promise<void>;
   fetchClassSessions: (classId: string) => Promise<void>;
   createClass: (
-    newClass: Omit<Class, "classId" | "created_at">
+    newClass: Omit<Class, "classId" | "created_at" | "joinCode"> // Removed joinCode as it's generated server-side
   ) => Promise<string>;
   createSession: (
     newSession: Omit<Session, "sessionId" | "created_at">
@@ -109,16 +121,20 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   fetchClasses: async (teacherId: string) => {
     set({ isLoadingClasses: true, classesError: null });
     try {
-      const snapshot = await classesCollection()
-        .where("teacherId", "==", teacherId)
-        .get();
+      // Use v9+ query syntax
+      const q = query(classesCollection(), where("teacherId", "==", teacherId));
+      const snapshot = await getDocs(q);
 
-      const classes = snapshot.docs.map((doc) => ({
-        ...doc.data(),
-        classId: doc.id,
-      }));
+      const fetchedClasses = snapshot.docs.map((docSnap) => {
+        // Explicitly assert type since converter is not used on collection
+        const data = docSnap.data() as Class;
+        return {
+          ...data,
+          classId: docSnap.id,
+        };
+      });
 
-      set({ classes, isLoadingClasses: false });
+      set({ classes: fetchedClasses, isLoadingClasses: false });
     } catch (error) {
       console.error("Error fetching classes:", error);
       set({
@@ -131,10 +147,9 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   fetchUserClasses: async (userId: string) => {
     set({ isLoadingUserClasses: true, userClassesError: null });
     try {
-      // Using the userClasses collection for efficiency
-      const snapshot = await getFirestore()
-        .collection(`userClasses/${userId}/classes`)
-        .get();
+      // Using the userClasses collection for efficiency with v9+ syntax
+      const userClassesRef = userSpecificClassesCollection(userId);
+      const snapshot = await getDocs(userClassesRef);
 
       if (snapshot.empty) {
         set({ currentUserClasses: [], isLoadingUserClasses: false });
@@ -142,23 +157,26 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
       }
 
       // Get the full class details for each class ID
-      const classIds = snapshot.docs.map((doc) => doc.id);
+      const classIds = snapshot.docs.map((docSnap) => docSnap.id);
+      // Use base collection ref for doc() calls
+      const classesColRef = collection(getFirestore(app), "classes");
       const classPromises = classIds.map((id) =>
-        classesCollection().doc(id).get()
+        getDoc(doc(classesColRef, id))
       );
 
       const classResults = await Promise.all(classPromises);
-      const classes = classResults
-        .filter((doc) => doc.exists)
-        .map(
-          (doc) =>
-            ({
-              ...doc.data(),
-              classId: doc.id,
-            } as Class)
-        );
+      const fetchedClasses = classResults
+        .filter((docSnap) => docSnap.exists) // Keep simple exists check
+        .map((docSnap) => {
+          // Explicitly assert type
+          const data = docSnap.data() as Class;
+          return {
+            ...data,
+            classId: docSnap.id,
+          };
+        });
 
-      set({ currentUserClasses: classes, isLoadingUserClasses: false });
+      set({ currentUserClasses: fetchedClasses, isLoadingUserClasses: false });
     } catch (error) {
       console.error("Error fetching user classes:", error);
       set({
@@ -172,17 +190,24 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   fetchClassSessions: async (classId: string) => {
     set({ isLoadingSessions: true, sessionsError: null });
     try {
-      const snapshot = await sessionsCollection()
-        .where("classId", "==", classId)
-        .orderBy("startTime", "desc")
-        .get();
+      // Use v9+ query syntax
+      const q = query(
+        sessionsCollection(),
+        where("classId", "==", classId),
+        orderBy("startTime", "desc")
+      );
+      const snapshot = await getDocs(q);
 
-      const sessions = snapshot.docs.map((doc) => ({
-        ...doc.data(),
-        sessionId: doc.id,
-      }));
+      const fetchedSessions = snapshot.docs.map((docSnap) => {
+        // Explicitly assert type
+        const data = docSnap.data() as Session;
+        return {
+          ...data,
+          sessionId: docSnap.id,
+        };
+      });
 
-      set({ sessions, isLoadingSessions: false });
+      set({ sessions: fetchedSessions, isLoadingSessions: false });
     } catch (error) {
       console.error("Error fetching sessions:", error);
       set({
@@ -193,56 +218,78 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   },
 
   createClass: async (newClass) => {
+    // Explicitly return Promise<string>
     try {
-      // Create new class document with auto-generated ID
-      const classRef = classesCollection().doc();
+      const db = getFirestore(app);
+      // Create ref in base collection
+      const classesColRef = collection(getFirestore(app), "classes");
+      const classRef = doc(classesColRef);
 
-      // Prepare class data with created_at timestamp
+      // Prepare class data
       const classData: Class = {
         ...newClass,
         classId: classRef.id,
-        created_at: firestore.Timestamp.now(),
+        created_at: Timestamp.now(),
+        // joinCode is optional and added by cloud function
       };
 
-      // Save to Firestore
-      await classRef.set(classData);
+      const batch = writeBatch(db);
+      // Set data using the untyped ref (Firestore handles the object)
+      batch.set(classRef, classData);
 
-      // Update local state
+      const userClassRef = doc(
+        userSpecificClassesCollection(newClass.teacherId),
+        classRef.id
+      );
+      batch.set(userClassRef, { added_at: Timestamp.now() });
+
+      await batch.commit();
+
+      // Update local state optimistically
+      // Ensure the object matches Class type, explicitly setting joinCode as undefined
+      const optimisticClassData: Class = {
+        ...classData,
+        joinCode: undefined,
+      };
+
       set((state) => ({
-        classes: [...state.classes, classData],
+        classes: [...state.classes, optimisticClassData],
       }));
 
       return classRef.id;
     } catch (error) {
       console.error("Error creating class:", error);
-      throw error;
+      throw error; // Re-throw the error to be handled by the caller
     }
   },
 
-  createSession: async (newSession) => {
+  createSession: async (newSession): Promise<string> => {
+    // Explicit return type
     try {
-      // Create new session document with auto-generated ID
-      const sessionRef = sessionsCollection().doc();
+      // Create ref in base collection
+      const sessionsColRef = collection(getFirestore(app), "sessions");
+      const sessionRef = doc(sessionsColRef);
 
-      // Prepare session data with created_at timestamp
+      // Prepare session data
       const sessionData: Session = {
         ...newSession,
         sessionId: sessionRef.id,
-        created_at: firestore.Timestamp.now(),
+        created_at: Timestamp.now(),
       };
 
-      // Save to Firestore
-      await sessionRef.set(sessionData);
+      // Save to Firestore using untyped ref
+      await setDoc(sessionRef, sessionData);
 
       // Update local state
       set((state) => ({
-        sessions: [...state.sessions, sessionData],
+        // Order might change if not re-fetching, add to beginning if sorted desc
+        sessions: [sessionData, ...state.sessions],
       }));
 
       return sessionRef.id;
     } catch (error) {
       console.error("Error creating session:", error);
-      throw error;
+      throw error; // Re-throw the error to be handled by the caller
     }
   },
 }));

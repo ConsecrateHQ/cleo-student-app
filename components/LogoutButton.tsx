@@ -5,9 +5,14 @@ import useAuthStore from "../hooks/useAuthStore";
 
 const LogoutButton = () => {
   const logout = useAuthStore((state) => state.logout);
+  const user = useAuthStore((state) => state.user);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    // In dev mode, even with no user (e.g. after a database nuke), we still want to reset the auth state
+    if (!user && __DEV__) {
+      console.log("DEV mode: No user found, but resetting auth state anyway");
+    }
+    await logout();
   };
 
   return (
@@ -15,6 +20,7 @@ const LogoutButton = () => {
       style={styles.button}
       onPress={handleLogout}
       activeOpacity={0.7}
+      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
     >
       <Text style={styles.text}>Logout</Text>
     </TouchableOpacity>

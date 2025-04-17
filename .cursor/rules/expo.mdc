@@ -4,3 +4,7 @@ globs:
 alwaysApply: true
 ---
 The app we are building is an attendance checking app that uses GPS to check whether students are attending class. We use Expo and React Native. Always use expo-routes for routing. Make sure to write the best code possible.
+
+The ClassCard component are only boilerplates for now, when writing code, don't make use of them.
+
+Make sure you use the new Firebase V9 syntax.

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "48288193953",
+    "project_id": "cleo-dev-f31ac",
+    "storage_bucket": "cleo-dev-f31ac.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:48288193953:android:7f9fe1f6aab76ec7fe3fe0",
+        "android_client_info": {
+          "package_name": "com.joshtrung.cleo"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "48288193953-pkpqocfcd9mcua4togvkguahcv8u5k0a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.joshtrung.cleo",
+            "certificate_hash": "caaa670f8b0acdb6c397d7564c56804aa5d8d763"
+          }
+        },
+        {
+          "client_id": "48288193953-qabq45adf4lbsscfk4oc6rkv55m16trj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmOQ98OyZzzOSMDfwMP4_UJ5r0xye7L00"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "48288193953-qabq45adf4lbsscfk4oc6rkv55m16trj.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "48288193953-p05auhmbc3jblrm70dg19egbfaeiqto4.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.joshtrung.cleo"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

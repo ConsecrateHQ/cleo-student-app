@@ -4,8 +4,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { StyleSheet } from "react-native";
 import useAuthStore from "../hooks/useAuthStore";
-import auth, { FirebaseAuthTypes } from "@react-native-firebase/auth";
-import { initializeFirebase } from "../utils/firebaseConfig";
+import { getAuth, FirebaseAuthTypes } from "@react-native-firebase/auth";
+import { initializeFirebase, app } from "../utils/firebaseConfig";
 
 // Initialize Firebase with emulators if in dev mode
 initializeFirebase();
@@ -19,7 +19,8 @@ export default function RootLayout() {
 
   // Listener to update Zustand store
   useEffect(() => {
-    const unsubscribe = auth().onAuthStateChanged((firebaseUser) => {
+    const auth = getAuth(app);
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
       // console.log("Auth state changed, user:", firebaseUser?.uid);
       // It might be helpful to compare the new user with the existing one
       // to prevent unnecessary updates if the user object reference changes

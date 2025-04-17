@@ -11,7 +11,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.joshtrung.cleo",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to verify attendance in class.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location to verify attendance in class, even when the app is in the background.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to verify attendance in class, both while using the app and in the background."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +24,13 @@
         "backgroundColor": "#ffffff"
       },
       "googleServicesFile": "./google-services.json",
-      "package": "com.joshtrung.cleo"
+      "package": "com.joshtrung.cleo",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -28,6 +39,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-location",
       [
         "expo-splash-screen",
         {
@@ -50,6 +62,14 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "9d560014-53ef-4e41-8386-1331441ed7cf"
+      }
     }
   }
 }

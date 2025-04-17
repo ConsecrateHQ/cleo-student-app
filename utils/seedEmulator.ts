@@ -10,14 +10,11 @@ import {
   getDocs,
   query,
   limit,
-  CollectionReference,
-  DocumentReference,
-  Firestore,
-  QuerySnapshot,
-  DocumentData,
+  type FirebaseFirestoreTypes,
 } from "@react-native-firebase/firestore";
-import auth from "@react-native-firebase/auth";
+// auth from "@react-native-firebase/auth"; // Removed unused import
 import { Alert } from "react-native";
+import { app } from "./firebaseConfig"; // Import shared app instance
 
 /**
  * Seeds the Firebase emulator with sample data for testing
@@ -36,7 +33,7 @@ export const seedEmulator = async () => {
     console.log("  -> [Seed] Verifying emulator connection...");
     try {
       console.log("     - [Seed Conn Test] Getting Firestore instance...");
-      const db = getFirestore(); // Get instance using modular function
+      const db = getFirestore(app); // Use imported app
       console.log("     - [Seed Conn Test] Getting collection ref...");
       const collectionRef = collection(db, "_test_connection"); // Use modular collection()
       console.log("     - [Seed Conn Test] Getting document ref...");
@@ -88,7 +85,7 @@ export const seedEmulator = async () => {
     console.log("    - ✅ Existing data cleared.");
 
     console.log("  -> [Seed] Creating test users...");
-    const db = getFirestore(); // Get instance again (or pass db if preferred)
+    const db = getFirestore(app); // Use imported app
     // Create teacher user
     const teacherUid = "teacher123";
     const teacherRef = doc(db, "users", teacherUid); // Use modular doc(db, collectionPath, docId)
@@ -219,7 +216,7 @@ export const seedEmulator = async () => {
  */
 export const clearEmulatorData = async () => {
   console.log("🧹 [Clear] Starting to clear existing emulator data...");
-  const db = getFirestore(); // Use modular getFirestore()
+  const db = getFirestore(app); // Use imported app
 
   try {
     const collectionsToClear = [
@@ -239,7 +236,7 @@ export const clearEmulatorData = async () => {
 
       console.log(`    - [Clear] Fetching documents from ${collectionName}...`);
       // Use pagination with modular query() and limit()
-      let querySnapshot: QuerySnapshot<DocumentData>;
+      let querySnapshot: FirebaseFirestoreTypes.QuerySnapshot<FirebaseFirestoreTypes.DocumentData>;
       let docsInCollection = 0;
       let lastVisibleDoc = null; // Needed for pagination if implemented, but not strictly necessary for limit(100).get() loop
 
@@ -262,9 +259,11 @@ export const clearEmulatorData = async () => {
         );
 
         const batch = writeBatch(db); // Use modular writeBatch()
-        querySnapshot.docs.forEach((doc) => {
-          batch.delete(doc.ref); // batch.delete syntax remains the same
-        });
+        querySnapshot.docs.forEach(
+          (doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => {
+            batch.delete(doc.ref); // batch.delete syntax remains the same
+          }
+        );
 
         console.log(
           `    - [Clear] Committing batch delete for ${querySnapshot.size} documents in ${collectionName}...`

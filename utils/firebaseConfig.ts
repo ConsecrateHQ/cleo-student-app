@@ -1,8 +1,15 @@
-import firestore, {
+import {
+  getFirestore,
+  connectFirestoreEmulator,
   FirebaseFirestoreTypes,
 } from "@react-native-firebase/firestore";
-import auth from "@react-native-firebase/auth";
+import { getAuth, connectAuthEmulator } from "@react-native-firebase/auth";
 import { Platform } from "react-native";
+import { getApp } from "@react-native-firebase/app";
+
+// Initialize the app instance once
+// Type is inferred from getApp()
+export const app = getApp();
 
 const useEmulator = __DEV__;
 // Host IP address must point to your machine's IP, not localhost
@@ -24,6 +31,7 @@ export const initializeFirebase = () => {
   console.log(
     `[FirebaseConfig] initializeFirebase called. __DEV__ is ${__DEV__}`
   );
+
   if (useEmulator) {
     const host = getEmulatorHost();
     const firestorePort = 8082;
@@ -35,7 +43,7 @@ export const initializeFirebase = () => {
       console.log(
         `[FirebaseConfig]   -> Connecting to Firestore emulator at ${host}:${firestorePort}...`
       );
-      firestore().useEmulator(host, firestorePort);
+      connectFirestoreEmulator(getFirestore(app), host, firestorePort);
       console.log(
         "[FirebaseConfig]   ✅ Firestore emulator connection configured."
       );
@@ -50,7 +58,7 @@ export const initializeFirebase = () => {
       console.log(
         `[FirebaseConfig]   -> Connecting to Auth emulator at http://${host}:${authPort}...`
       );
-      auth().useEmulator(`http://${host}:${authPort}`);
+      connectAuthEmulator(getAuth(app), `http://${host}:${authPort}`);
       console.log("[FirebaseConfig]   ✅ Auth emulator connection configured.");
     } catch (e) {
       console.error(
@@ -63,13 +71,6 @@ export const initializeFirebase = () => {
       "[FirebaseConfig] Not using emulators (production mode or __DEV__ is false)."
     );
   }
-};
-
-/**
- * Get a singleton Firestore instance
- */
-export const getFirestore = () => {
-  return firestore();
 };
 
 /**
