@@ -1,5 +1,11 @@
-import React, { useCallback, useMemo, useRef } from "react";
-import { View, Text, StyleSheet, StatusBar } from "react-native";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +19,9 @@ import Animated, {
 } from "react-native-reanimated";
 import ClassCard from "../components/ClassCard";
 import LogoutButton from "../components/LogoutButton";
+import DevMenu from "../components/DevMenu";
+import { Ionicons } from "@expo/vector-icons";
+import useAuthStore from "../hooks/useAuthStore";
 
 const App = () => {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -152,6 +161,9 @@ const App = () => {
     </Animated.View>
   );
 
+  const user = useAuthStore((state) => state.user);
+  const [devMenuVisible, setDevMenuVisible] = useState(false);
+
   return (
     <GestureHandlerRootView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -184,6 +196,23 @@ const App = () => {
           </Animated.View>
 
           <LogoutButton />
+
+          {/* Dev menu button - only visible in development */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={styles.devButton}
+              onPress={() => setDevMenuVisible(true)}
+            >
+              <Ionicons name="construct-outline" size={20} color="white" />
+              <Text style={styles.devButtonText}>Dev Menu</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Dev menu modal */}
+          <DevMenu
+            visible={devMenuVisible}
+            onClose={() => setDevMenuVisible(false)}
+          />
         </BottomSheetView>
       </BottomSheet>
     </GestureHandlerRootView>
@@ -224,6 +253,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     marginBottom: 10,
+  },
+  devButton: {
+    position: "absolute",
+    bottom: 20,
+    right: 20,
+    backgroundColor: "#666",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  devButtonText: {
+    color: "white",
+    marginLeft: 6,
+    fontWeight: "500",
   },
 });
 

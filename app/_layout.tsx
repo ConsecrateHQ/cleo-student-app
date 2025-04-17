@@ -5,6 +5,10 @@ import "react-native-reanimated";
 import { StyleSheet } from "react-native";
 import useAuthStore from "../hooks/useAuthStore";
 import auth, { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import { initializeFirebase } from "../utils/firebaseConfig";
+
+// Initialize Firebase with emulators if in dev mode
+initializeFirebase();
 
 export default function RootLayout() {
   // Select state and actions separately for stable references
