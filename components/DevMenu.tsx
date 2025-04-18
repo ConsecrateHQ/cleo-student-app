@@ -15,10 +15,9 @@ import { Ionicons } from "@expo/vector-icons";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
 import LocationPermissionButton from "./LocationPermissionButton";
-import firestore, {
-  FirebaseFirestoreTypes,
-} from "@react-native-firebase/firestore";
 import {
+  FirebaseFirestoreTypes,
+  getFirestore,
   collection,
   doc,
   getDoc,
@@ -32,6 +31,7 @@ import {
   GeoPoint,
   limit,
 } from "@react-native-firebase/firestore";
+import { app } from "../utils/firebaseConfig";
 
 interface DevMenuProps {
   visible: boolean;
@@ -47,6 +47,9 @@ interface ActionButtonProps {
   disabled?: boolean;
 }
 
+// Get the configured Firestore instance
+const db = getFirestore(app);
+
 export default function DevMenu({ visible, onClose }: DevMenuProps) {
   const user = useAuthStore((state) => state.user);
   const [isLoading, setIsLoading] = useState<{
@@ -57,6 +60,8 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
     addUser: false,
     deactivate: false,
     start: false,
+    testConnection: false,
+    createMultipleSessions: false,
   });
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentClassId, setCurrentClassId] = useState<string | null>(null);
@@ -64,12 +69,121 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
   // Hardcoded sample class and session IDs (should match your seeding logic)
   const SAMPLE_CLASS_NAME = "Computer Science 101";
 
+  const handleTestConnection = async () => {
+    try {
+      setIsLoading((prev) => ({ ...prev, testConnection: true }));
+      console.log("Testing connection to Firestore...");
+
+      const testRef = collection(db, "test_connection");
+      const timestamp = new Date().toISOString();
+
+      console.log("Attempting addDoc..."); // Add log before
+      const docRef = await addDoc(testRef, {
+        timestamp,
+        message: "Connection test successful",
+      });
+      console.log(`addDoc successful, docRef ID: ${docRef.id}`); // Add log after
+
+      // await getDoc(docRef); // Temporarily comment out getDoc
+
+      Alert.alert(
+        "Firestore Connection",
+        `Successfully performed WRITE on Firestore (doc ID: ${docRef.id}).`
+      );
+      console.log("Firestore connection test successful (write only)");
+    } catch (error: any) {
+      console.error("Error testing Firestore connection:", error);
+      Alert.alert(
+        "Connection Error",
+        `Failed to connect/write to Firestore: ${
+          error?.message || String(error)
+        }`
+      );
+    } finally {
+      setIsLoading((prev) => ({ ...prev, testConnection: false }));
+    }
+  };
+
   const handleSeedEmulator = async () => {
     try {
       setIsLoading((prev) => ({ ...prev, seed: true }));
       console.log("Starting seed operation...");
       await seedEmulator();
       console.log("Seed operation completed successfully");
+
+      // --- Add multiple sessions for the sample class here ---
+      // Find the sample class
+      const classesRef = collection(db, "classes");
+      const classQuery = query(
+        classesRef,
+        where("name", "==", SAMPLE_CLASS_NAME),
+        limit(1)
+      );
+      const classSnap = await getDocs(classQuery);
+
+      if (classSnap.empty) {
+        Alert.alert("No Class", "Sample class not found after seeding.");
+        return;
+      }
+
+      const classId = classSnap.docs[0].id;
+      setCurrentClassId(classId);
+      const classData = classSnap.docs[0].data();
+      const teacherId = classData.teacherId || "teacher123";
+
+      // Remove any existing active session for this class (optional, for clean state)
+      const sessionsRef = collection(db, "sessions");
+      const activeSessionQuery = query(
+        sessionsRef,
+        where("classId", "==", classId),
+        where("status", "==", "active")
+      );
+      const activeSessionSnap = await getDocs(activeSessionQuery);
+      for (const docSnap of activeSessionSnap.docs) {
+        await updateDoc(doc(db, "sessions", docSnap.id), {
+          status: "ended",
+          endTime: Timestamp.now(),
+        });
+      }
+
+      // Create 4 past sessions
+      const now = new Date();
+      for (let i = 0; i < 4; i++) {
+        const pastDate = new Date();
+        pastDate.setDate(now.getDate() - (i + 1));
+        const startTime = new Date(pastDate);
+        startTime.setHours(9, 0, 0);
+        const endTime = new Date(pastDate);
+        endTime.setHours(10, 30, 0);
+        await addDoc(sessionsRef, {
+          classId,
+          teacherId,
+          startTime: Timestamp.fromDate(startTime),
+          endTime: Timestamp.fromDate(endTime),
+          status: "ended",
+          location: new GeoPoint(34.0522, -118.2437),
+          radius: 100,
+          created_at: Timestamp.fromDate(pastDate),
+        });
+      }
+
+      // Create 1 active session
+      const activeSessionRef = await addDoc(sessionsRef, {
+        classId,
+        teacherId,
+        startTime: Timestamp.now(),
+        endTime: null,
+        status: "active",
+        location: new GeoPoint(34.0522, -118.2437),
+        radius: 100,
+        created_at: Timestamp.now(),
+      });
+      setCurrentSessionId(activeSessionRef.id);
+
+      Alert.alert(
+        "Success",
+        "Seeded database and created 4 past sessions + 1 active session!"
+      );
     } catch (error: any) {
       console.error("Error in handleSeedEmulator:", error);
       Alert.alert(
@@ -108,9 +222,9 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       }
 
       // 1. Ensure user exists in 'users' collection
-      const userRef = doc(firestore(), "users", user.uid);
+      const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
-      if (!userSnap.exists) {
+      if (!userSnap.exists()) {
         await setDoc(userRef, {
           uid: user.uid,
           email: user.email || "",
@@ -122,7 +236,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       }
 
       console.log("Finding sample class...");
-      const classesRef = collection(firestore(), "classes");
+      const classesRef = collection(db, "classes");
       const q = query(
         classesRef,
         where("name", "==", SAMPLE_CLASS_NAME),
@@ -139,22 +253,10 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       const classData = classDoc.data();
 
       console.log(`Adding user ${user.uid} to class ${classId}...`);
-      const studentRef = doc(
-        firestore(),
-        "classes",
-        classId,
-        "students",
-        user.uid
-      );
+      const studentRef = doc(db, "classes", classId, "students", user.uid);
       await setDoc(studentRef, { joinDate: Timestamp.now() });
 
-      const userClassRef = doc(
-        firestore(),
-        "userClasses",
-        user.uid,
-        "classes",
-        classId
-      );
+      const userClassRef = doc(db, "userClasses", user.uid, "classes", classId);
       await setDoc(userClassRef, {
         className: classData.name,
         teacherName: classData.teacherName || "Unknown Teacher", // Assuming teacherName exists
@@ -177,7 +279,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
   const getSampleActiveSessionDocRef =
     async (): Promise<FirebaseFirestoreTypes.DocumentReference | null> => {
       console.log("Looking for sample class...");
-      const classesRef = collection(firestore(), "classes");
+      const classesRef = collection(db, "classes");
       const classQuery = query(
         classesRef,
         where("name", "==", SAMPLE_CLASS_NAME),
@@ -196,7 +298,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       console.log(
         `Found class with ID: ${classId}, looking for ACTIVE session...`
       );
-      const sessionsRef = collection(firestore(), "sessions");
+      const sessionsRef = collection(db, "sessions");
       const sessionQuery = query(
         sessionsRef,
         where("classId", "==", classId),
@@ -290,7 +392,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         created_at: Timestamp.now(),
       };
 
-      const sessionsCollectionRef = collection(firestore(), "sessions");
+      const sessionsCollectionRef = collection(db, "sessions");
       const newSessionRef = await addDoc(sessionsCollectionRef, newSessionData);
 
       console.log(`New session started with ID: ${newSessionRef.id}`);
@@ -304,6 +406,101 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       );
     } finally {
       setIsLoading((prev) => ({ ...prev, start: false }));
+    }
+  };
+
+  const handleCreateMultipleSessions = async () => {
+    if (!user) {
+      Alert.alert("No User", "Cannot create sessions without logged in user.");
+      return;
+    }
+
+    try {
+      setIsLoading((prev) => ({ ...prev, createMultipleSessions: true }));
+
+      // First find the sample class
+      console.log("Looking for sample class...");
+      const classesRef = collection(db, "classes");
+      const classQuery = query(
+        classesRef,
+        where("name", "==", SAMPLE_CLASS_NAME),
+        limit(1)
+      );
+      const classSnap = await getDocs(classQuery);
+
+      if (classSnap.empty) {
+        Alert.alert("No Class", "Sample class not found");
+        return;
+      }
+
+      const classId = classSnap.docs[0].id;
+      setCurrentClassId(classId);
+
+      // Check if there's already an active session
+      const existingActiveSession = await getSampleActiveSessionDocRef();
+      if (existingActiveSession) {
+        Alert.alert(
+          "Session Active",
+          "An active session already exists. Deactivate it first."
+        );
+        return;
+      }
+
+      console.log(`Creating multiple sessions for class ${classId}...`);
+      const sessionsCollectionRef = collection(db, "sessions");
+
+      // Get current time for reference
+      const now = new Date();
+
+      // Create 4 past sessions
+      for (let i = 0; i < 4; i++) {
+        const pastDate = new Date();
+        pastDate.setDate(now.getDate() - (i + 1)); // Sessions from recent to older
+
+        const startTime = new Date(pastDate);
+        startTime.setHours(9, 0, 0); // 9:00 AM
+
+        const endTime = new Date(pastDate);
+        endTime.setHours(10, 30, 0); // 10:30 AM
+
+        await addDoc(sessionsCollectionRef, {
+          classId,
+          teacherId: user.uid,
+          startTime: Timestamp.fromDate(startTime),
+          endTime: Timestamp.fromDate(endTime),
+          status: "ended",
+          location: new GeoPoint(34.0522, -118.2437), // Example: Los Angeles
+          radius: 100,
+          created_at: Timestamp.fromDate(pastDate),
+        });
+
+        console.log(`Created past session #${i + 1}`);
+      }
+
+      // Create 1 active session
+      const activeSessionRef = await addDoc(sessionsCollectionRef, {
+        classId,
+        teacherId: user.uid,
+        startTime: Timestamp.now(),
+        endTime: null,
+        status: "active",
+        location: new GeoPoint(34.0522, -118.2437),
+        radius: 100,
+        created_at: Timestamp.now(),
+      });
+
+      console.log(`Created active session with ID: ${activeSessionRef.id}`);
+      setCurrentSessionId(activeSessionRef.id);
+
+      Alert.alert("Success", "Created 4 past sessions and 1 active session!");
+    } catch (error: any) {
+      console.error("Error creating multiple sessions:", error);
+      Alert.alert(
+        "Error",
+        `Failed to create sessions: ${error?.message || String(error)}`
+      );
+    } finally {
+      setIsLoading((prev) => ({ ...prev, createMultipleSessions: false }));
     }
   };
 
@@ -359,10 +556,16 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
             <Text style={styles.sectionTitle}>Firebase Emulators</Text>
 
             <Text style={styles.emulatorInfo}>
-              Status: Using emulator ({firestore().app.name}) at http://
-              {firestore().app.options.settings?.host}:
-              {firestore().app.options.settings?.port}/firestore
+              Status: Using emulator ({app.name}). Check logs for host/port.
             </Text>
+
+            <ActionButton
+              icon="flash-outline"
+              text="Test Connection to Firestore"
+              onPress={handleTestConnection}
+              isLoading={isLoading.testConnection}
+              loadingText="Testing connection..."
+            />
 
             <ActionButton
               icon="leaf-outline"
