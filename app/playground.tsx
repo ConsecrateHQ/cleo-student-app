@@ -12,7 +12,10 @@ import MapView, { Marker, Circle } from "react-native-maps";
 import useAuthStore from "../hooks/useAuthStore"; // Path updated
 import { useUserClasses } from "../hooks/useUserClasses"; // Path updated
 import { useLocation } from "../hooks/useLocation"; // Path updated
-import { isWithinRadius } from "../utils/locationHelpers"; // Import the helper
+import {
+  validateLocationForSession,
+  calculateDistance,
+} from "../utils/locationHelpers"; // Updated import
 import theme from "../theme"; // Path updated
 
 const ATTENDANCE_RADIUS_METERS = 100; // Define attendance radius
@@ -46,7 +49,7 @@ export default function PlaygroundScreen() {
         );
 
         // Force the radius to be larger for testing
-        const isWithin = isWithinRadius(
+        const isWithin = validateLocationForSession(
           cls.location,
           studentCoords,
           ATTENDANCE_RADIUS_METERS
@@ -170,17 +173,19 @@ export default function PlaygroundScreen() {
               <Text style={styles.coordinateText}>
                 Longitude: {location.coords.longitude.toFixed(6)}
               </Text>
+
+              {/* User's current location map */}
+              <Text style={styles.mapLabel}>Your Current Location</Text>
               <MapView
                 style={styles.map}
                 initialRegion={{
                   latitude: location.coords.latitude,
                   longitude: location.coords.longitude,
-                  latitudeDelta: 0.005, // Zoom level
-                  longitudeDelta: 0.005, // Zoom level
+                  latitudeDelta: 0.005,
+                  longitudeDelta: 0.005,
                 }}
-                showsUserLocation={false} // We'll use a marker instead
-                scrollEnabled={false} // Disable scroll for a static view
-                zoomEnabled={false} // Disable zoom
+                scrollEnabled={false}
+                zoomEnabled={false}
               >
                 <Marker
                   coordinate={{
@@ -188,45 +193,89 @@ export default function PlaygroundScreen() {
                     longitude: location.coords.longitude,
                   }}
                   title="Your Location"
-                  pinColor="blue" // Make user marker blue for consistency
+                  pinColor="blue"
                 />
-                {/* Blue circle for user location */}
                 <Circle
                   center={{
                     latitude: location.coords.latitude,
                     longitude: location.coords.longitude,
                   }}
-                  radius={ATTENDANCE_RADIUS_METERS} // Use consistent radius
-                  strokeColor="rgba(0, 0, 255, 0.5)" // Blue border
-                  fillColor="rgba(0, 0, 255, 0.2)" // Blue fill
+                  radius={ATTENDANCE_RADIUS_METERS}
+                  strokeColor="rgba(0, 0, 255, 0.5)"
+                  fillColor="rgba(0, 0, 255, 0.2)"
                 />
-                {/* Purple circles for active class locations */}
-                {currentUserClasses.map(
-                  (cls) =>
-                    cls.hasActiveSession &&
-                    cls.location && (
-                      <React.Fragment key={`marker-circle-${cls.classId}`}>
+              </MapView>
+
+              {/* Separate maps for each active class location */}
+              {currentUserClasses.map(
+                (cls) =>
+                  cls.hasActiveSession &&
+                  cls.location && (
+                    <View
+                      key={`map-${cls.classId}`}
+                      style={styles.classMapContainer}
+                    >
+                      <Text style={styles.mapLabel}>
+                        {cls.className} Location
+                        {validateLocationForSession(
+                          cls.location,
+                          {
+                            latitude: location.coords.latitude,
+                            longitude: location.coords.longitude,
+                          },
+                          ATTENDANCE_RADIUS_METERS
+                        ) ? (
+                          <Text style={styles.inRadiusText}>
+                            {" "}
+                            (You are within range)
+                          </Text>
+                        ) : (
+                          <Text style={styles.outOfRangeText}>
+                            {" "}
+                            (Out of range)
+                          </Text>
+                        )}
+                      </Text>
+                      <Text style={styles.distanceText}>
+                        Distance:{" "}
+                        {calculateDistance(cls.location, {
+                          latitude: location.coords.latitude,
+                          longitude: location.coords.longitude,
+                        }).toFixed(2)}{" "}
+                        meters from your location
+                      </Text>
+                      <MapView
+                        style={styles.map}
+                        initialRegion={{
+                          latitude: cls.location.latitude,
+                          longitude: cls.location.longitude,
+                          latitudeDelta: 0.005,
+                          longitudeDelta: 0.005,
+                        }}
+                        scrollEnabled={false}
+                        zoomEnabled={false}
+                      >
                         <Marker
                           coordinate={{
                             latitude: cls.location.latitude,
                             longitude: cls.location.longitude,
                           }}
                           title={`${cls.className} Location`}
-                          pinColor="purple" // Use purple for class markers
+                          pinColor="purple"
                         />
                         <Circle
                           center={{
                             latitude: cls.location.latitude,
                             longitude: cls.location.longitude,
                           }}
-                          radius={ATTENDANCE_RADIUS_METERS} // Use consistent radius
-                          strokeColor="rgba(128, 0, 128, 0.5)" // Purple border
-                          fillColor="rgba(128, 0, 128, 0.2)" // Purple fill
+                          radius={ATTENDANCE_RADIUS_METERS}
+                          strokeColor="rgba(128, 0, 128, 0.5)"
+                          fillColor="rgba(128, 0, 128, 0.2)"
                         />
-                      </React.Fragment>
-                    )
-                )}
-              </MapView>
+                      </MapView>
+                    </View>
+                  )
+              )}
             </>
           ) : (
             <Text style={styles.emptyText}>Location data not available.</Text>
@@ -395,4 +444,28 @@ const styles = StyleSheet.create({
     color: theme.colors.status.error, // Use error color
   },
   // --- End Status Section Styles ---
+  mapLabel: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.colors.text.primary,
+    marginBottom: 8,
+  },
+  classMapContainer: {
+    marginBottom: 16,
+  },
+  inRadiusText: {
+    color: theme.colors.status.success,
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  outOfRangeText: {
+    color: theme.colors.status.error,
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  distanceText: {
+    fontSize: 14,
+    color: theme.colors.text.secondary,
+    marginTop: 4,
+  },
 });

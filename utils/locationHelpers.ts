@@ -71,3 +71,20 @@ export function isWithinRadius(
 
   return distance <= radius;
 }
+
+/**
+ * Validates if a student's location is within the attendance radius of a class session.
+ * Acts as a semantic wrapper around isWithinRadius.
+ *
+ * @param sessionLocation - The location coordinates of the class session
+ * @param studentLocation - The location coordinates of the student
+ * @param attendanceRadius - The radius (in meters) within which attendance is valid
+ * @returns True if the student's location is valid for attendance, false otherwise
+ */
+export function validateLocationForSession(
+  sessionLocation: FirebaseFirestoreTypes.GeoPoint | Coordinates,
+  studentLocation: Coordinates,
+  attendanceRadius: number = 100 // Default radius of 100 meters
+): boolean {
+  return isWithinRadius(sessionLocation, studentLocation, attendanceRadius);
+}
