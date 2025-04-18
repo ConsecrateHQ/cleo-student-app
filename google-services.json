@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "48288193953-in5auvgf39o3qgd4rh2mqqusgh0cuef1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.joshtrung.cleo",
+            "certificate_hash": "dfe7ffba80dde62281b7b473538f752ef94626d0"
+          }
+        },
+        {
           "client_id": "48288193953-pkpqocfcd9mcua4togvkguahcv8u5k0a.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

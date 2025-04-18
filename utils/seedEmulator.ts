@@ -86,7 +86,7 @@ export const seedEmulator = async () => {
 
     console.log("  -> [Seed] Creating test users...");
     const db = getFirestore(app); // Use imported app
-    // Create teacher user
+    // Create teacher users
     const teacherUid = "teacher123";
     const teacherRef = doc(db, "users", teacherUid); // Use modular doc(db, collectionPath, docId)
     await setDoc(teacherRef, {
@@ -98,6 +98,18 @@ export const seedEmulator = async () => {
       created_at: Timestamp.now(), // Use modular Timestamp
     });
     console.log(`    - Created teacher user: ${teacherUid}`);
+
+    // Create second teacher
+    const germanTeacherUid = "teacher456";
+    const germanTeacherRef = doc(db, "users", germanTeacherUid);
+    await setDoc(germanTeacherRef, {
+      uid: germanTeacherUid,
+      email: "frau.tuyen@example.com",
+      displayName: "Frau Tuyen",
+      role: "teacher",
+      created_at: Timestamp.now(),
+    });
+    console.log(`    - Created teacher user: ${germanTeacherUid}`);
 
     // Create student users
     const studentIds = ["student1", "student2", "student3"];
@@ -131,6 +143,18 @@ export const seedEmulator = async () => {
       created_at: Timestamp.now(), // Use modular Timestamp
     });
     console.log(`    - ✅ Test class created with ID: ${classId}`);
+
+    // Create German A2 class
+    const germanClassRef = doc(classesColRef);
+    const germanClassId = germanClassRef.id;
+    await setDoc(germanClassRef, {
+      classId: germanClassId,
+      name: "German A2",
+      teacherId: germanTeacherUid,
+      joinCode: "GER102",
+      created_at: Timestamp.now(),
+    });
+    console.log(`    - ✅ German A2 class created with ID: ${germanClassId}`);
 
     console.log(`  -> [Seed] Enrolling students in class ${classId}...`);
     // Enroll students in the class
@@ -190,10 +214,27 @@ export const seedEmulator = async () => {
     });
     console.log(`    - ✅ Test session created with ID: ${sessionRef.id}`);
 
+    // Create a session for German A2 class
+    const germanSessionRef = doc(sessionsColRef);
+    await setDoc(germanSessionRef, {
+      sessionId: germanSessionRef.id,
+      classId: germanClassId,
+      teacherId: germanTeacherUid,
+      startTime: Timestamp.now(),
+      endTime: null,
+      status: "active",
+      location: new GeoPoint(52.52, 13.405), // Berlin coordinates
+      radius: 100, // meters
+      created_at: Timestamp.now(),
+    });
+    console.log(
+      `    - ✅ German A2 session created with ID: ${germanSessionRef.id}`
+    );
+
     console.log("✅ [Seed] Emulator seeded successfully!");
     Alert.alert(
       "Success",
-      "Firebase emulators seeded with sample data. Created 1 teacher, 3 students, 1 class, and 1 active session."
+      "Firebase emulators seeded with sample data. Created 2 teachers, 3 students, 2 classes (CS101 and German A2), and 2 active sessions."
     );
   } catch (error) {
     console.error("❌ [Seed] Error during emulator seeding:", error);

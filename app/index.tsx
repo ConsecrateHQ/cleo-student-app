@@ -1,156 +1,48 @@
-import React, {
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  useEffect,
-} from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   StatusBar,
   TouchableOpacity,
-  Modal,
   ActivityIndicator,
   Platform,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Dimensions } from "react-native";
 import theme from "../theme";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  interpolate,
-  Extrapolate,
-} from "react-native-reanimated";
+import Animated, { useSharedValue } from "react-native-reanimated";
 import ClassCard from "../components/ClassCard";
 import LogoutButton from "../components/LogoutButton";
 import DevMenu from "../components/DevMenu";
 import { Ionicons } from "@expo/vector-icons";
 import useAuthStore from "../hooks/useAuthStore";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useUserClasses } from "../hooks/useUserClasses";
-import * as Location from "expo-location";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import { useBottomSheetAnimations } from "../hooks/useBottomSheetAnimations";
+import { router } from "expo-router";
 
 const App = () => {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const insets = useSafeAreaInsets();
   const windowHeight = Dimensions.get("window").height;
   const animatedPosition = useSharedValue(windowHeight);
   const snapPoints = useMemo(() => [140, windowHeight], [windowHeight]);
 
-  const initialBottomSheetHeight = snapPoints[0];
-  const fadeDistance = 20;
-  const collapseDistance = 20;
-
-  const positionAtInitialHeight = windowHeight - initialBottomSheetHeight;
-  const positionAtFadeEnd = positionAtInitialHeight - fadeDistance;
-  const positionAtCollapseEnd = positionAtFadeEnd - collapseDistance;
-
-  const titleAnimationEndPosition =
-    positionAtInitialHeight - positionAtInitialHeight / 3;
-
-  const fadeStart = positionAtFadeEnd;
-  const fadeEnd = fadeStart + fadeDistance;
-  const collapseStart = fadeEnd;
-  const collapseEnd = collapseStart + collapseDistance;
-
-  const animatedSessionCountStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      animatedPosition.value,
-      [positionAtFadeEnd, positionAtInitialHeight],
-      [0, 1],
-      Extrapolate.CLAMP
-    );
-
-    return {
-      opacity: opacity,
-    };
-  });
-
-  const animatedTitleStyle = useAnimatedStyle(() => {
-    const targetScale = 1.1;
-    const targetTranslateX = 20;
-    const targetMarginTop = 20;
-
-    const scale = interpolate(
-      animatedPosition.value,
-      [titleAnimationEndPosition, positionAtInitialHeight],
-      [targetScale, 1],
-      Extrapolate.CLAMP
-    );
-
-    const translateX = interpolate(
-      animatedPosition.value,
-      [titleAnimationEndPosition, positionAtInitialHeight],
-      [targetTranslateX, 0],
-      Extrapolate.CLAMP
-    );
-
-    const marginTop = interpolate(
-      animatedPosition.value,
-      [titleAnimationEndPosition, positionAtInitialHeight],
-      [targetMarginTop, 0],
-      Extrapolate.CLAMP
-    );
-
-    return {
-      transform: [{ scale }, { translateX }],
-      marginTop: marginTop,
-    };
+  // Use the bottom sheet animation hook
+  const {
+    animatedTitleStyle,
+    animatedContentStyle,
+    animatedGridStyle,
+    animatedSessionCountContainerStyle,
+  } = useBottomSheetAnimations({
+    animatedPosition,
+    windowHeight,
+    snapPoints,
   });
 
   const handleSheetChanges = useCallback((index: number) => {
     console.log("handleSheetChanges", index);
   }, []);
-
-  const animatedContentStyle = useAnimatedStyle(() => {
-    const sheetTop = animatedPosition.value;
-    const paddingTop = interpolate(
-      sheetTop,
-      [insets.top, 0],
-      [0, insets.top],
-      Extrapolate.CLAMP
-    );
-
-    return {
-      paddingTop: paddingTop,
-    };
-  });
-
-  const animatedGridStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      animatedPosition.value,
-      [windowHeight - snapPoints[0], windowHeight - snapPoints[1]],
-      [0, 1],
-      Extrapolate.CLAMP
-    );
-    return { opacity };
-  });
-
-  const animatedSessionCountContainerStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(
-      animatedPosition.value,
-      [positionAtFadeEnd, positionAtInitialHeight],
-      [0, 1],
-      Extrapolate.CLAMP
-    );
-    const height = interpolate(
-      animatedPosition.value,
-      [positionAtCollapseEnd, positionAtFadeEnd],
-      [0, 24],
-      Extrapolate.CLAMP
-    );
-    return {
-      opacity,
-      height,
-      overflow: "hidden",
-    };
-  });
 
   const CustomHandle = () => (
     <Animated.View style={animatedContentStyle}>
@@ -176,44 +68,6 @@ const App = () => {
 
   const user = useAuthStore((state) => state.user);
   const [devMenuVisible, setDevMenuVisible] = useState(false);
-  const { classes: currentUserClasses, loading: isLoadingUserClasses } =
-    useUserClasses(user?.uid);
-
-  // State for location
-  const [location, setLocation] = useState<Location.LocationObject | null>(
-    null
-  );
-  const [locationErrorMsg, setLocationErrorMsg] = useState<string | null>(null);
-  const [isLocationLoading, setIsLocationLoading] = useState(true);
-
-  // Effect for location fetching
-  useEffect(() => {
-    (async () => {
-      setIsLocationLoading(true);
-      setLocationErrorMsg(null);
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setLocationErrorMsg(
-          "Permission to access location was denied. Please enable it in settings."
-        );
-        setIsLocationLoading(false);
-        return;
-      }
-
-      try {
-        let currentLocation = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.BestForNavigation, // Highest accuracy
-        });
-        setLocation(currentLocation);
-        console.log("Fetched Location:", currentLocation.coords);
-      } catch (error) {
-        console.error("Error fetching location:", error);
-        setLocationErrorMsg("Failed to fetch location.");
-      } finally {
-        setIsLocationLoading(false);
-      }
-    })();
-  }, []);
 
   console.log("Is DEV mode?", __DEV__);
 
@@ -221,116 +75,6 @@ const App = () => {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
         <StatusBar barStyle="light-content" />
-
-        {/* User Info Section */}
-        <View style={styles.userInfoContainer}>
-          {!user ? (
-            <Text style={styles.userInfoBypassed}>Login is bypassed.</Text>
-          ) : (
-            <View>
-              <Text style={styles.userInfoName}>
-                {user.displayName || "No Name"}
-              </Text>
-              <Text style={styles.userInfoDetail}>
-                Email: {user.email || "N/A"}
-              </Text>
-              <Text style={styles.userInfoDetail}>UUID: {user.uid}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* User's Classes */}
-        {user && (
-          <View style={styles.classListContainer}>
-            <Text style={styles.sectionTitle}>Your Classes</Text>
-            {isLoadingUserClasses ? (
-              <ActivityIndicator
-                color={theme.colors.button.primary}
-                size="large"
-              />
-            ) : currentUserClasses.length === 0 ? (
-              <Text style={styles.emptyText}>No classes found.</Text>
-            ) : (
-              currentUserClasses.map((cls) => (
-                <View key={cls.classId} style={styles.classCardRow}>
-                  <View style={styles.classTextContainer}>
-                    <Text style={styles.classNameText}>{cls.className}</Text>
-                    {cls.teacherName && (
-                      <Text style={styles.teacherNameText}>
-                        Teacher: {cls.teacherName}
-                      </Text>
-                    )}
-                    {cls.joinCode && (
-                      <Text style={styles.infoText}>
-                        Join Code:{" "}
-                        <Text style={styles.highlightText}>{cls.joinCode}</Text>
-                      </Text>
-                    )}
-                    {cls.hasActiveSession && (
-                      <View style={styles.activeSessionContainer}>
-                        <View style={styles.activeBadge}>
-                          <Text style={styles.activeBadgeText}>
-                            Active Session
-                          </Text>
-                        </View>
-                        {cls.location && (
-                          <Text style={styles.locationText}>
-                            Location: {cls.location.latitude.toFixed(4)},{" "}
-                            {cls.location.longitude.toFixed(4)}
-                          </Text>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        )}
-
-        {/* My Location Section */}
-        <View style={styles.locationContainer}>
-          <Text style={styles.sectionTitle}>My Location</Text>
-          {isLocationLoading ? (
-            <ActivityIndicator
-              color={theme.colors.button.primary}
-              size="large"
-            />
-          ) : locationErrorMsg ? (
-            <Text style={styles.errorText}>{locationErrorMsg}</Text>
-          ) : location ? (
-            <>
-              <Text style={styles.coordinateText}>
-                Latitude: {location.coords.latitude.toFixed(6)}
-              </Text>
-              <Text style={styles.coordinateText}>
-                Longitude: {location.coords.longitude.toFixed(6)}
-              </Text>
-              <MapView
-                style={styles.map}
-                initialRegion={{
-                  latitude: location.coords.latitude,
-                  longitude: location.coords.longitude,
-                  latitudeDelta: 0.005, // Zoom level
-                  longitudeDelta: 0.005, // Zoom level
-                }}
-                showsUserLocation={false} // We'll use a marker instead
-                scrollEnabled={false} // Disable scroll for a static view
-                zoomEnabled={false} // Disable zoom
-              >
-                <Marker
-                  coordinate={{
-                    latitude: location.coords.latitude,
-                    longitude: location.coords.longitude,
-                  }}
-                  title="Your Location"
-                />
-              </MapView>
-            </>
-          ) : (
-            <Text style={styles.emptyText}>Location data not available.</Text>
-          )}
-        </View>
 
         <BottomSheet
           ref={bottomSheetRef}
@@ -363,15 +107,24 @@ const App = () => {
           </BottomSheetView>
         </BottomSheet>
 
-        {/* Dev menu button - positioned at top right */}
+        {/* Dev and Exp menu buttons - positioned at top right */}
         {__DEV__ && (
-          <TouchableOpacity
-            style={styles.devMenuButton}
-            onPress={() => setDevMenuVisible(true)}
-          >
-            <Ionicons name="construct-outline" size={20} color="white" />
-            <Text style={styles.devMenuButtonText}>Dev</Text>
-          </TouchableOpacity>
+          <View style={styles.topRightButtonsContainer}>
+            <TouchableOpacity
+              style={styles.devMenuButton}
+              onPress={() => setDevMenuVisible(true)}
+            >
+              <Ionicons name="construct-outline" size={20} color="white" />
+              <Text style={styles.devMenuButtonText}>Dev</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.expMenuButton}
+              onPress={() => router.push("/playground")}
+            >
+              <Ionicons name="flask-outline" size={20} color="white" />
+              <Text style={styles.devMenuButtonText}>Exp.</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Dev menu modal */}
@@ -423,17 +176,30 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 10,
   },
-  devMenuButton: {
+  topRightButtonsContainer: {
     position: "absolute",
     top: 50,
     right: 20,
+    flexDirection: "row",
+    zIndex: 2000,
+  },
+  devMenuButton: {
     backgroundColor: "rgba(102, 102, 102, 0.9)",
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
-    zIndex: 2000,
+    elevation: 10,
+    marginRight: 8,
+  },
+  expMenuButton: {
+    backgroundColor: "rgba(102, 102, 102, 0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
     elevation: 10,
   },
   devMenuButtonText: {

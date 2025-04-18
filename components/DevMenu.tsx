@@ -27,6 +27,7 @@ import {
   where,
   getDocs,
   updateDoc,
+  deleteDoc,
   Timestamp,
   GeoPoint,
   limit,
@@ -47,6 +48,13 @@ interface ActionButtonProps {
   disabled?: boolean;
 }
 
+interface ClassInfo {
+  id: string | null;
+  name: string;
+  sessionId: string | null;
+  userIsEnrolled: boolean;
+}
+
 // Get the configured Firestore instance
 const db = getFirestore(app);
 
@@ -57,17 +65,31 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
   }>({
     seed: false,
     clear: false,
-    addUser: false,
-    deactivate: false,
-    start: false,
+    addUserCS101: false,
+    addUserGermanA2: false,
+    deactivateCS101: false,
+    deactivateGermanA2: false,
+    startCS101: false,
+    startGermanA2: false,
     testConnection: false,
     createMultipleSessions: false,
   });
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [currentClassId, setCurrentClassId] = useState<string | null>(null);
 
-  // Hardcoded sample class and session IDs (should match your seeding logic)
-  const SAMPLE_CLASS_NAME = "Computer Science 101";
+  // Track info for both classes
+  const [classes, setClasses] = useState<{ [key: string]: ClassInfo }>({
+    CS101: {
+      id: null,
+      name: "Computer Science 101",
+      sessionId: null,
+      userIsEnrolled: false,
+    },
+    GermanA2: {
+      id: null,
+      name: "German A2",
+      sessionId: null,
+      userIsEnrolled: false,
+    },
+  });
 
   const handleTestConnection = async () => {
     try {
@@ -111,79 +133,10 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       await seedEmulator();
       console.log("Seed operation completed successfully");
 
-      // --- Add multiple sessions for the sample class here ---
-      // Find the sample class
-      const classesRef = collection(db, "classes");
-      const classQuery = query(
-        classesRef,
-        where("name", "==", SAMPLE_CLASS_NAME),
-        limit(1)
-      );
-      const classSnap = await getDocs(classQuery);
+      // Refresh class data after seeding
+      await fetchClassData();
 
-      if (classSnap.empty) {
-        Alert.alert("No Class", "Sample class not found after seeding.");
-        return;
-      }
-
-      const classId = classSnap.docs[0].id;
-      setCurrentClassId(classId);
-      const classData = classSnap.docs[0].data();
-      const teacherId = classData.teacherId || "teacher123";
-
-      // Remove any existing active session for this class (optional, for clean state)
-      const sessionsRef = collection(db, "sessions");
-      const activeSessionQuery = query(
-        sessionsRef,
-        where("classId", "==", classId),
-        where("status", "==", "active")
-      );
-      const activeSessionSnap = await getDocs(activeSessionQuery);
-      for (const docSnap of activeSessionSnap.docs) {
-        await updateDoc(doc(db, "sessions", docSnap.id), {
-          status: "ended",
-          endTime: Timestamp.now(),
-        });
-      }
-
-      // Create 4 past sessions
-      const now = new Date();
-      for (let i = 0; i < 4; i++) {
-        const pastDate = new Date();
-        pastDate.setDate(now.getDate() - (i + 1));
-        const startTime = new Date(pastDate);
-        startTime.setHours(9, 0, 0);
-        const endTime = new Date(pastDate);
-        endTime.setHours(10, 30, 0);
-        await addDoc(sessionsRef, {
-          classId,
-          teacherId,
-          startTime: Timestamp.fromDate(startTime),
-          endTime: Timestamp.fromDate(endTime),
-          status: "ended",
-          location: new GeoPoint(34.0522, -118.2437),
-          radius: 100,
-          created_at: Timestamp.fromDate(pastDate),
-        });
-      }
-
-      // Create 1 active session
-      const activeSessionRef = await addDoc(sessionsRef, {
-        classId,
-        teacherId,
-        startTime: Timestamp.now(),
-        endTime: null,
-        status: "active",
-        location: new GeoPoint(34.0522, -118.2437),
-        radius: 100,
-        created_at: Timestamp.now(),
-      });
-      setCurrentSessionId(activeSessionRef.id);
-
-      Alert.alert(
-        "Success",
-        "Seeded database and created 4 past sessions + 1 active session!"
-      );
+      Alert.alert("Success", "Database seeded successfully!");
     } catch (error: any) {
       console.error("Error in handleSeedEmulator:", error);
       Alert.alert(
@@ -201,6 +154,22 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       console.log("Starting clear operation...");
       await clearEmulatorData();
       console.log("Clear operation completed successfully");
+
+      // Reset class data
+      setClasses({
+        CS101: {
+          id: null,
+          name: "Computer Science 101",
+          sessionId: null,
+          userIsEnrolled: false,
+        },
+        GermanA2: {
+          id: null,
+          name: "German A2",
+          sessionId: null,
+          userIsEnrolled: false,
+        },
+      });
     } catch (error: any) {
       console.error("Error in handleClearEmulator:", error);
       Alert.alert(
@@ -212,183 +181,260 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
     }
   };
 
-  const handleAddCurrentUserToClass = async () => {
+  // Helper function to fetch class info and enrollment status
+  const fetchClassData = async () => {
+    if (!user) return;
+
     try {
-      setIsLoading((prev) => ({ ...prev, addUser: true }));
+      // Find classes and check if user is enrolled
+      for (const key of ["CS101", "GermanA2"]) {
+        const className =
+          key === "CS101" ? "Computer Science 101" : "German A2";
+
+        // Find class
+        const classesRef = collection(db, "classes");
+        const classQuery = query(
+          classesRef,
+          where("name", "==", className),
+          limit(1)
+        );
+        const classSnap = await getDocs(classQuery);
+
+        let classId = null;
+        let sessionId = null;
+        let userIsEnrolled = false;
+
+        if (!classSnap.empty) {
+          classId = classSnap.docs[0].id;
+
+          // Check if user is enrolled in this class
+          const studentRef = doc(db, "classes", classId, "students", user.uid);
+          const studentSnap = await getDoc(studentRef);
+          userIsEnrolled = studentSnap.exists;
+
+          // Check for active sessions
+          const sessionsRef = collection(db, "sessions");
+          const sessionQuery = query(
+            sessionsRef,
+            where("classId", "==", classId),
+            where("status", "==", "active"),
+            limit(1)
+          );
+          const sessionSnap = await getDocs(sessionQuery);
+
+          if (!sessionSnap.empty) {
+            sessionId = sessionSnap.docs[0].id;
+          }
+        }
+
+        setClasses((prev) => ({
+          ...prev,
+          [key]: {
+            ...prev[key],
+            id: classId,
+            sessionId,
+            userIsEnrolled,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching class data:", error);
+    }
+  };
+
+  const handleToggleUserInClass = async (classKey: string) => {
+    try {
+      const loadingKey =
+        classKey === "CS101" ? "addUserCS101" : "addUserGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: true }));
 
       if (!user) {
         Alert.alert("No User", "No user logged in");
         return;
       }
 
-      // 1. Ensure user exists in 'users' collection
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        await setDoc(userRef, {
-          uid: user.uid,
-          email: user.email || "",
-          displayName: user.displayName || "Unnamed User",
-          role: "student",
-          created_at: Timestamp.now(),
-        });
-        console.log(`Created user document for ${user.uid}`);
-      }
-
-      console.log("Finding sample class...");
-      const classesRef = collection(db, "classes");
-      const q = query(
-        classesRef,
-        where("name", "==", SAMPLE_CLASS_NAME),
-        limit(1)
-      );
-      const classSnap = await getDocs(q);
-
-      if (classSnap.empty) {
-        Alert.alert("Class Not Found", "Sample class not found");
+      const classInfo = classes[classKey];
+      if (!classInfo.id) {
+        Alert.alert("Class Not Found", `${classInfo.name} not found`);
         return;
       }
-      const classDoc = classSnap.docs[0];
-      const classId = classDoc.id;
-      const classData = classDoc.data();
 
-      console.log(`Adding user ${user.uid} to class ${classId}...`);
-      const studentRef = doc(db, "classes", classId, "students", user.uid);
-      await setDoc(studentRef, { joinDate: Timestamp.now() });
+      // If user is already enrolled, remove them
+      if (classInfo.userIsEnrolled) {
+        // Remove from class's students subcollection
+        const studentRef = doc(
+          db,
+          "classes",
+          classInfo.id,
+          "students",
+          user.uid
+        );
+        await deleteDoc(studentRef);
 
-      const userClassRef = doc(db, "userClasses", user.uid, "classes", classId);
-      await setDoc(userClassRef, {
-        className: classData.name,
-        teacherName: classData.teacherName || "Unknown Teacher", // Assuming teacherName exists
-        joinDate: Timestamp.now(),
-      });
+        // Remove from user's classes
+        const userClassRef = doc(
+          db,
+          "userClasses",
+          user.uid,
+          "classes",
+          classInfo.id
+        );
+        await deleteDoc(userClassRef);
 
-      Alert.alert("Success", "User added to class!");
+        Alert.alert("Success", `User removed from ${classInfo.name}!`);
+      } else {
+        // 1. Ensure user exists in 'users' collection
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists) {
+          await setDoc(userRef, {
+            uid: user.uid,
+            email: user.email || "",
+            displayName: user.displayName || "Unnamed User",
+            role: "student",
+            created_at: Timestamp.now(),
+          });
+          console.log(`Created user document for ${user.uid}`);
+        }
+
+        // Find teacher name
+        const classDocRef = doc(db, "classes", classInfo.id);
+        const classDoc = await getDoc(classDocRef);
+        const classData = classDoc.data() || {};
+        const teacherName =
+          classKey === "CS101" ? "Professor Smith" : "Frau Tuyen";
+
+        // Add user to class's students subcollection
+        const studentRef = doc(
+          db,
+          "classes",
+          classInfo.id,
+          "students",
+          user.uid
+        );
+        await setDoc(studentRef, { joinDate: Timestamp.now() });
+
+        // Add class to user's classes
+        const userClassRef = doc(
+          db,
+          "userClasses",
+          user.uid,
+          "classes",
+          classInfo.id
+        );
+        await setDoc(userClassRef, {
+          className: classInfo.name,
+          teacherName: teacherName,
+          joinDate: Timestamp.now(),
+        });
+
+        Alert.alert("Success", `User added to ${classInfo.name}!`);
+      }
+
+      // Update the enrollment status
+      await fetchClassData();
     } catch (error: any) {
-      console.error("Error in handleAddCurrentUserToClass:", error);
+      console.error(`Error toggling user in ${classKey}:`, error);
       Alert.alert(
-        "Adding Error",
-        `Error adding user to class: ${error?.message || String(error)}`
+        "Error",
+        `Failed to modify enrollment: ${error?.message || String(error)}`
       );
     } finally {
-      setIsLoading((prev) => ({ ...prev, addUser: false }));
+      const loadingKey =
+        classKey === "CS101" ? "addUserCS101" : "addUserGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
     }
   };
 
-  // Helper to get the *active* session for the sample class
-  const getSampleActiveSessionDocRef =
-    async (): Promise<FirebaseFirestoreTypes.DocumentReference | null> => {
-      console.log("Looking for sample class...");
-      const classesRef = collection(db, "classes");
-      const classQuery = query(
-        classesRef,
-        where("name", "==", SAMPLE_CLASS_NAME),
-        limit(1)
-      );
-      const classSnap = await getDocs(classQuery);
-
-      if (classSnap.empty) {
-        console.log("No sample class found");
-        setCurrentClassId(null);
-        setCurrentSessionId(null);
-        return null;
-      }
-      const classId = classSnap.docs[0].id;
-      setCurrentClassId(classId);
-      console.log(
-        `Found class with ID: ${classId}, looking for ACTIVE session...`
-      );
-      const sessionsRef = collection(db, "sessions");
-      const sessionQuery = query(
-        sessionsRef,
-        where("classId", "==", classId),
-        where("status", "==", "active"),
-        limit(1)
-      );
-      const sessionSnap = await getDocs(sessionQuery);
-
-      if (sessionSnap.empty) {
-        console.log("No active session found for this class");
-        setCurrentSessionId(null);
-        return null;
-      }
-      const sessionId = sessionSnap.docs[0].id;
-      console.log(`Found active session with ID: ${sessionId}`);
-      setCurrentSessionId(sessionId);
-      return sessionSnap.docs[0].ref;
-    };
-
-  // Run check on component mount and when menu opens
-  useEffect(() => {
-    if (visible) {
-      getSampleActiveSessionDocRef();
-    }
-  }, [visible]);
-
-  const handleDeactivateSession = async () => {
+  const handleDeactivateSession = async (classKey: string) => {
     try {
-      setIsLoading((prev) => ({ ...prev, deactivate: true }));
-      const sessionRef = await getSampleActiveSessionDocRef(); // Re-check which session is active
-      if (!sessionRef) {
+      const loadingKey =
+        classKey === "CS101" ? "deactivateCS101" : "deactivateGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: true }));
+
+      const classInfo = classes[classKey];
+      if (!classInfo.sessionId) {
         Alert.alert(
           "No Active Session",
-          "No active session found to deactivate."
+          `No active session found for ${classInfo.name}.`
         );
         return;
       }
-      console.log(`Deactivating session: ${sessionRef.id}...`);
+
+      console.log(
+        `Deactivating session: ${classInfo.sessionId} for ${classInfo.name}...`
+      );
+      const sessionRef = doc(db, "sessions", classInfo.sessionId);
       await updateDoc(sessionRef, {
         status: "ended",
         endTime: Timestamp.now(),
       });
-      setCurrentSessionId(null); // Clear current session ID
-      Alert.alert("Success", "Session deactivated (ended)");
+
+      // Update class info
+      await fetchClassData();
+      Alert.alert(
+        "Success",
+        `Session for ${classInfo.name} deactivated (ended)`
+      );
     } catch (error: any) {
-      console.error("Error in handleDeactivateSession:", error);
+      console.error(`Error deactivating session for ${classKey}:`, error);
       Alert.alert(
         "Deactivation Error",
         `Error deactivating session: ${error?.message || String(error)}`
       );
     } finally {
-      setIsLoading((prev) => ({ ...prev, deactivate: false }));
+      const loadingKey =
+        classKey === "CS101" ? "deactivateCS101" : "deactivateGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
     }
   };
 
-  const handleStartNewSession = async () => {
+  const handleStartNewSession = async (classKey: string) => {
     if (!user) {
       Alert.alert("No User", "Cannot start session without logged in user.");
       return;
     }
-    if (!currentClassId) {
-      Alert.alert("No Class", "Cannot start session, sample class not found.");
-      // Attempt to find it again
-      await getSampleActiveSessionDocRef();
-      if (!currentClassId) return;
+
+    const classInfo = classes[classKey];
+    if (!classInfo.id) {
+      Alert.alert(
+        "No Class",
+        `Cannot start session, ${classInfo.name} not found.`
+      );
+      return;
     }
 
-    // Check if there's already an active session before creating a new one
-    const existingActiveSession = await getSampleActiveSessionDocRef();
-    if (existingActiveSession) {
+    // Check if there's already an active session
+    if (classInfo.sessionId) {
       Alert.alert(
         "Session Active",
-        "An active session already exists for this class. Deactivate it first."
+        `An active session already exists for ${classInfo.name}. Deactivate it first.`
       );
       return;
     }
 
     try {
-      setIsLoading((prev) => ({ ...prev, start: true }));
-      console.log(`Starting new session for class ${currentClassId}...`);
+      const loadingKey = classKey === "CS101" ? "startCS101" : "startGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: true }));
+      console.log(
+        `Starting new session for ${classInfo.name} (ID: ${classInfo.id})...`
+      );
 
-      // Define new session data (customize location/radius as needed)
+      // Use different locations for each class
+      const location =
+        classKey === "CS101"
+          ? new GeoPoint(34.0522, -118.2437) // Los Angeles
+          : new GeoPoint(52.52, 13.405); // Berlin
+
+      // Define new session data
       const newSessionData = {
-        classId: currentClassId,
-        teacherId: user.uid, // Assuming the current user is the teacher for dev purposes
+        classId: classInfo.id,
+        teacherId: user.uid,
         startTime: Timestamp.now(),
         endTime: null,
         status: "active",
-        location: new GeoPoint(34.0522, -118.2437), // Example: Los Angeles
-        radius: 100, // Example: 100 meters
+        location,
+        radius: 100, // meters
         created_at: Timestamp.now(),
       };
 
@@ -396,113 +442,28 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       const newSessionRef = await addDoc(sessionsCollectionRef, newSessionData);
 
       console.log(`New session started with ID: ${newSessionRef.id}`);
-      setCurrentSessionId(newSessionRef.id);
-      Alert.alert("Success", "New session started!");
+
+      // Update class info
+      await fetchClassData();
+      Alert.alert("Success", `New session started for ${classInfo.name}!`);
     } catch (error: any) {
-      console.error("Error in handleStartNewSession:", error);
+      console.error(`Error starting session for ${classKey}:`, error);
       Alert.alert(
         "Starting Error",
         `Error starting new session: ${error?.message || String(error)}`
       );
     } finally {
-      setIsLoading((prev) => ({ ...prev, start: false }));
+      const loadingKey = classKey === "CS101" ? "startCS101" : "startGermanA2";
+      setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
     }
   };
 
-  const handleCreateMultipleSessions = async () => {
-    if (!user) {
-      Alert.alert("No User", "Cannot create sessions without logged in user.");
-      return;
+  // Run check on component mount and when menu opens
+  useEffect(() => {
+    if (visible && user) {
+      fetchClassData();
     }
-
-    try {
-      setIsLoading((prev) => ({ ...prev, createMultipleSessions: true }));
-
-      // First find the sample class
-      console.log("Looking for sample class...");
-      const classesRef = collection(db, "classes");
-      const classQuery = query(
-        classesRef,
-        where("name", "==", SAMPLE_CLASS_NAME),
-        limit(1)
-      );
-      const classSnap = await getDocs(classQuery);
-
-      if (classSnap.empty) {
-        Alert.alert("No Class", "Sample class not found");
-        return;
-      }
-
-      const classId = classSnap.docs[0].id;
-      setCurrentClassId(classId);
-
-      // Check if there's already an active session
-      const existingActiveSession = await getSampleActiveSessionDocRef();
-      if (existingActiveSession) {
-        Alert.alert(
-          "Session Active",
-          "An active session already exists. Deactivate it first."
-        );
-        return;
-      }
-
-      console.log(`Creating multiple sessions for class ${classId}...`);
-      const sessionsCollectionRef = collection(db, "sessions");
-
-      // Get current time for reference
-      const now = new Date();
-
-      // Create 4 past sessions
-      for (let i = 0; i < 4; i++) {
-        const pastDate = new Date();
-        pastDate.setDate(now.getDate() - (i + 1)); // Sessions from recent to older
-
-        const startTime = new Date(pastDate);
-        startTime.setHours(9, 0, 0); // 9:00 AM
-
-        const endTime = new Date(pastDate);
-        endTime.setHours(10, 30, 0); // 10:30 AM
-
-        await addDoc(sessionsCollectionRef, {
-          classId,
-          teacherId: user.uid,
-          startTime: Timestamp.fromDate(startTime),
-          endTime: Timestamp.fromDate(endTime),
-          status: "ended",
-          location: new GeoPoint(34.0522, -118.2437), // Example: Los Angeles
-          radius: 100,
-          created_at: Timestamp.fromDate(pastDate),
-        });
-
-        console.log(`Created past session #${i + 1}`);
-      }
-
-      // Create 1 active session
-      const activeSessionRef = await addDoc(sessionsCollectionRef, {
-        classId,
-        teacherId: user.uid,
-        startTime: Timestamp.now(),
-        endTime: null,
-        status: "active",
-        location: new GeoPoint(34.0522, -118.2437),
-        radius: 100,
-        created_at: Timestamp.now(),
-      });
-
-      console.log(`Created active session with ID: ${activeSessionRef.id}`);
-      setCurrentSessionId(activeSessionRef.id);
-
-      Alert.alert("Success", "Created 4 past sessions and 1 active session!");
-    } catch (error: any) {
-      console.error("Error creating multiple sessions:", error);
-      Alert.alert(
-        "Error",
-        `Failed to create sessions: ${error?.message || String(error)}`
-      );
-    } finally {
-      setIsLoading((prev) => ({ ...prev, createMultipleSessions: false }));
-    }
-  };
+  }, [visible, user]);
 
   // Create a button component with loading state
   const ActionButton = ({
@@ -598,44 +559,108 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
 
             <LocationPermissionButton />
 
+            <Text style={styles.sectionTitle}>User Class Enrollment</Text>
+
             <ActionButton
-              icon="person-add-outline"
-              text="Add Current User to Class"
-              onPress={handleAddCurrentUserToClass}
-              isLoading={isLoading.addUser}
-              loadingText="Adding user..."
+              icon={
+                classes.CS101.userIsEnrolled
+                  ? "person-remove-outline"
+                  : "person-add-outline"
+              }
+              text={
+                classes.CS101.userIsEnrolled
+                  ? "Remove User from Computer Science 101"
+                  : "Add User to Computer Science 101"
+              }
+              onPress={() => handleToggleUserInClass("CS101")}
+              isLoading={isLoading.addUserCS101}
+              loadingText={
+                classes.CS101.userIsEnrolled
+                  ? "Removing user..."
+                  : "Adding user..."
+              }
+              disabled={!user}
+            />
+
+            <ActionButton
+              icon={
+                classes.GermanA2.userIsEnrolled
+                  ? "person-remove-outline"
+                  : "person-add-outline"
+              }
+              text={
+                classes.GermanA2.userIsEnrolled
+                  ? "Remove User from German A2"
+                  : "Add User to German A2"
+              }
+              onPress={() => handleToggleUserInClass("GermanA2")}
+              isLoading={isLoading.addUserGermanA2}
+              loadingText={
+                classes.GermanA2.userIsEnrolled
+                  ? "Removing user..."
+                  : "Adding user..."
+              }
               disabled={!user}
             />
 
             <Text style={styles.sectionTitle}>
-              Sample Class Session Control
+              Computer Science 101 Session Control
             </Text>
             <Text style={styles.infoText}>
-              Controls the session for "{SAMPLE_CLASS_NAME}".
-              {currentClassId
-                ? ` (Class ID: ${currentClassId})`
-                : " (Class not found)"}
-              {currentSessionId
-                ? `\nCurrent Active Session ID: ${currentSessionId}`
+              {classes.CS101.id
+                ? `Class ID: ${classes.CS101.id}`
+                : "Class not found"}
+              {classes.CS101.sessionId
+                ? `\nCurrent Active Session ID: ${classes.CS101.sessionId}`
                 : "\nNo active session detected."}
             </Text>
 
             <ActionButton
               icon="play-circle-outline"
-              text="Start New Session"
-              onPress={handleStartNewSession}
-              isLoading={isLoading.start}
+              text="Start New CS101 Session"
+              onPress={() => handleStartNewSession("CS101")}
+              isLoading={isLoading.startCS101}
               loadingText="Starting..."
-              disabled={!user || !currentClassId || !!currentSessionId} // Disable if no user, no class, or session already active
+              disabled={!user || !classes.CS101.id || !!classes.CS101.sessionId}
             />
 
             <ActionButton
               icon="pause-circle-outline"
-              text="Deactivate Current Session"
-              onPress={handleDeactivateSession}
-              isLoading={isLoading.deactivate}
+              text="Deactivate CS101 Session"
+              onPress={() => handleDeactivateSession("CS101")}
+              isLoading={isLoading.deactivateCS101}
               loadingText="Deactivating..."
-              disabled={!currentSessionId} // Disable if no active session detected
+              disabled={!classes.CS101.sessionId}
+            />
+
+            <Text style={styles.sectionTitle}>German A2 Session Control</Text>
+            <Text style={styles.infoText}>
+              {classes.GermanA2.id
+                ? `Class ID: ${classes.GermanA2.id}`
+                : "Class not found"}
+              {classes.GermanA2.sessionId
+                ? `\nCurrent Active Session ID: ${classes.GermanA2.sessionId}`
+                : "\nNo active session detected."}
+            </Text>
+
+            <ActionButton
+              icon="play-circle-outline"
+              text="Start New German A2 Session"
+              onPress={() => handleStartNewSession("GermanA2")}
+              isLoading={isLoading.startGermanA2}
+              loadingText="Starting..."
+              disabled={
+                !user || !classes.GermanA2.id || !!classes.GermanA2.sessionId
+              }
+            />
+
+            <ActionButton
+              icon="pause-circle-outline"
+              text="Deactivate German A2 Session"
+              onPress={() => handleDeactivateSession("GermanA2")}
+              isLoading={isLoading.deactivateGermanA2}
+              loadingText="Deactivating..."
+              disabled={!classes.GermanA2.sessionId}
             />
 
             <Text style={styles.infoText}>

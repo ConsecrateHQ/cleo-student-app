@@ -1,0 +1,25 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Class Management
+
+getStudentClasses(studentId) - Returns all classes a student is enrolled in
+
+joinClassWithCode(studentId, joinCode) - Enrolls student in a class using the join code
+
+leaveClass(studentId, classId) - Removes student from a class (if allowed)
+
+# Session Management
+
+getActiveSessionsForStudent(studentId) - Returns all currently active sessions across student's classes
+
+getStudentAttendanceHistory(studentId, classId) - Returns student's attendance record for a specific class
+
+checkInToSession(sessionId, studentId, locationData) - Submits student's check-in with GPS data
+
+respondToVerificationRequest(sessionId, studentId, verificationData) - Sends verification data from student device
+
+# Authentication
+createUserAccount(userData, role) - Creates a new user with specified role

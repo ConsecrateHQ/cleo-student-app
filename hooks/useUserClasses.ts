@@ -1,176 +1,217 @@
 // app/hooks/useUserClasses.ts
-import { useEffect, useState } from "react";
-// Import modular functions from Firestore v9+ SDK
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   getFirestore,
-  collection,
-  doc,
-  onSnapshot, // Import onSnapshot
-  getDoc, // Import getDoc
-  query, // Import query
-  where, // Import where
-  limit, // Import limit
   FirebaseFirestoreTypes,
 } from "@react-native-firebase/firestore";
+import {
+  onStudentClassListUpdate,
+  getClassDetails,
+  getUserDetails,
+  onActiveClassSessionUpdate,
+  // Assuming these types were defined in the helpers file or we define them here
+  // BaseUserClassInfo, ClassDetails, UserDetails, ActiveSessionData
+} from "../utils/firebaseClassSessionHelpers"; // Adjust path as necessary
 
+// Keep the UserClass interface definition here as it represents the hook's output structure
 export interface UserClass {
   classId: string;
   className: string;
   teacherName?: string;
   joinDate: FirebaseFirestoreTypes.Timestamp;
   joinCode?: string;
-  hasActiveSession?: boolean;
+  hasActiveSession: boolean;
   location?: FirebaseFirestoreTypes.GeoPoint | null;
-  sessionId?: string; // Optional: Store the ID of the active session
+  sessionId?: string;
 }
 
 export function useUserClasses(userId: string | undefined) {
   const [classes, setClasses] = useState<UserClass[]>([]);
   const [loading, setLoading] = useState(true);
-  const db = getFirestore(); // Get Firestore instance once
+  const db = getFirestore(); // Firestore instance might not be needed directly if helpers handle it
+
+  // Ref to store unsubscribe functions for active session listeners
+  const sessionListenersRef = useRef<{ [classId: string]: () => void }>({});
+
+  // Define error handler
+  const handleSubscriptionError = useCallback((error: any) => {
+    console.error("Subscription Error:", error);
+    // Potentially update state to show an error message to the user
+    setLoading(false);
+    setClasses([]);
+  }, []);
 
   useEffect(() => {
     if (!userId) {
       setClasses([]);
       setLoading(false);
-      return () => {}; // Return an empty cleanup function
+      // Clear any existing session listeners if user logs out
+      Object.values(sessionListenersRef.current).forEach((unsubscribe) =>
+        unsubscribe()
+      );
+      sessionListenersRef.current = {};
+      return () => {};
     }
 
+    console.log(`[useUserClasses] Setting up listeners for userId: ${userId}`);
     setLoading(true);
-    let sessionListeners: (() => void)[] = []; // To store unsubscribe functions for sessions
 
-    // --- Listener for the user's list of classes (v9 syntax) ---
-    const userClassesRef = collection(db, "userClasses", userId, "classes");
-    const userClassesUnsubscribe = onSnapshot(
-      userClassesRef, // Use the v9 reference
-      async (userClassesSnapshot) => {
+    // Store the main class list unsubscribe function
+    let userClassesUnsubscribe: (() => void) | null = null;
+
+    // --- Listener for the user's list of classes using helper ---
+    userClassesUnsubscribe = onStudentClassListUpdate(
+      userId,
+      async (baseClassesInfo) => {
+        console.log(
+          `[useUserClasses] Received base class list update: ${baseClassesInfo.length} classes`
+        );
         // --- Cleanup previous session listeners ---
-        sessionListeners.forEach((unsubscribe) => unsubscribe());
-        sessionListeners = [];
-        // ---
-
-        if (userClassesSnapshot.empty) {
+        const previousClassIds = Object.keys(sessionListenersRef.current);
+        const newClassIds = baseClassesInfo.map((c) => c.classId);
+        previousClassIds.forEach((classId) => {
+          if (
+            !newClassIds.includes(classId) &&
+            sessionListenersRef.current[classId]
+          ) {
+            console.log(
+              `[useUserClasses] Unsubscribing from session listener for removed class: ${classId}`
+            );
+            sessionListenersRef.current[classId]();
+            delete sessionListenersRef.current[classId];
+          }
+        });
+        // --- Fetch details and set up new session listeners ---
+        if (baseClassesInfo.length === 0) {
+          console.log("[useUserClasses] User has no classes.");
           setClasses([]);
-          setLoading(false); // Stop loading if user has no classes
+          setLoading(false);
           return;
         }
 
-        // Initial fetch of class details (v9 syntax)
-        const classDetailsPromises = userClassesSnapshot.docs.map(
-          async (docSnapshot) => {
-            // Changed variable name from doc to docSnapshot for clarity
-            const classId = docSnapshot.id;
-            const userClassData = docSnapshot.data();
+        // Fetch static details (class info, teacher name) for all classes concurrently
+        const detailedClassesPromises = baseClassesInfo.map(
+          async (baseInfo) => {
+            try {
+              const classDetails = await getClassDetails(baseInfo.classId);
+              if (!classDetails) return null; // Class document might not exist yet or was deleted
 
-            // Fetch class details using v9 getDoc
-            const classDocRef = doc(db, "classes", classId);
-            const classDoc = await getDoc(classDocRef);
-
-            if (!classDoc.exists) return null; // Use exists property
-            const classData = classDoc.data() || {};
-
-            // Fetch teacher name using teacherId (v9 syntax)
-            let teacherName = "Unknown Teacher";
-            if (classData.teacherId) {
-              try {
-                const teacherDocRef = doc(db, "users", classData.teacherId);
-                const teacherDoc = await getDoc(teacherDocRef);
-                if (teacherDoc.exists) {
-                  // Use exists property
-                  teacherName = teacherDoc.data()?.displayName || teacherName;
-                }
-              } catch (error) {
-                console.error(
-                  `Failed to fetch teacher ${classData.teacherId} for class ${classId}:`,
-                  error
+              let teacherName = "Unknown Teacher";
+              if (classDetails.teacherId) {
+                const teacherDetails = await getUserDetails(
+                  classDetails.teacherId
                 );
+                teacherName = teacherDetails?.displayName || teacherName;
               }
-            }
 
-            return {
-              classId,
-              className:
-                userClassData.className || classData.name || "Unnamed Class",
-              teacherName: teacherName,
-              joinDate: userClassData.joinDate,
-              joinCode: classData.joinCode,
-              hasActiveSession: false,
-              location: null,
-              sessionId: undefined,
-            } as UserClass;
+              // Initial structure, session details will be added via listener
+              return {
+                ...baseInfo, // Includes classId, className from userClasses subcollection
+                className: classDetails.name || baseInfo.className, // Prefer name from /classes if available
+                teacherName: teacherName,
+                joinCode: classDetails.joinCode,
+                hasActiveSession: false, // Default, will be updated by listener
+                location: null,
+                sessionId: undefined,
+              } as UserClass;
+            } catch (error) {
+              console.error(
+                `[useUserClasses] Error fetching details for class ${baseInfo.classId}:`,
+                error
+              );
+              return null; // Exclude this class if details fetching fails
+            }
           }
         );
 
-        let initialClassData = (await Promise.all(classDetailsPromises)).filter(
-          Boolean
-        ) as UserClass[];
+        let initialClassData = (
+          await Promise.all(detailedClassesPromises)
+        ).filter(Boolean) as UserClass[];
 
-        // Update state with initial data (sessions might not be loaded yet)
-        setClasses(initialClassData);
-
-        // --- Setup real-time listeners for ACTIVE sessions for each class (v9 syntax) ---
-        initialClassData.forEach((classInfo) => {
-          const sessionsCollectionRef = collection(db, "sessions");
-          const sessionQuery = query(
-            // Use v9 query builder
-            sessionsCollectionRef,
-            where("classId", "==", classInfo.classId),
-            where("status", "==", "active"),
-            limit(1)
-          );
-
-          const sessionUnsubscribe = onSnapshot(
-            // Use v9 onSnapshot
-            sessionQuery,
-            (sessionSnapshot) => {
-              const hasActiveSession = !sessionSnapshot.empty;
-              let location: FirebaseFirestoreTypes.GeoPoint | null = null;
-              let sessionId: string | undefined = undefined;
-
-              if (hasActiveSession) {
-                const sessionData = sessionSnapshot.docs[0].data();
-                location = sessionData.location || null;
-                sessionId = sessionSnapshot.docs[0].id;
-              }
-
-              setClasses((prevClasses) =>
-                prevClasses.map((cls) =>
-                  cls.classId === classInfo.classId
-                    ? { ...cls, hasActiveSession, location, sessionId }
-                    : cls
-                )
-              );
-
-              setLoading(false);
-            },
-            (error) => {
-              console.error(
-                `Error listening to sessions for class ${classInfo.classId}:`,
-                error
-              );
-              setLoading(false);
-            }
-          );
-          sessionListeners.push(sessionUnsubscribe);
+        // Update state with initial data (session status might be stale initially)
+        // Preserve existing session status if the class was already present
+        setClasses((prevClasses) => {
+          const prevClassMap = new Map(prevClasses.map((c) => [c.classId, c]));
+          return initialClassData.map((newClass) => {
+            const existingClass = prevClassMap.get(newClass.classId);
+            return existingClass
+              ? {
+                  ...newClass,
+                  hasActiveSession: existingClass.hasActiveSession,
+                  location: existingClass.location,
+                  sessionId: existingClass.sessionId,
+                }
+              : newClass;
+          });
         });
-      },
-      (error) => {
-        console.error("Error fetching user classes:", error);
-        // --- Cleanup previous session listeners on error ---
-        sessionListeners.forEach((unsubscribe) => unsubscribe());
-        sessionListeners = [];
-        // ---
-        setClasses([]);
+
+        // --- Setup/update real-time listeners for ACTIVE sessions ---
+        initialClassData.forEach((classInfo) => {
+          // Only set up listener if it doesn't exist already
+          if (!sessionListenersRef.current[classInfo.classId]) {
+            console.log(
+              `[useUserClasses] Setting up session listener for class: ${classInfo.classId}`
+            );
+            const sessionUnsubscribe = onActiveClassSessionUpdate(
+              classInfo.classId,
+              (activeSession) => {
+                console.log(
+                  `[useUserClasses] Active session update for class ${classInfo.classId}:`,
+                  activeSession
+                    ? `Session ID: ${activeSession.sessionId}`
+                    : "No active session"
+                );
+                setClasses((prevClasses) =>
+                  prevClasses.map((cls) =>
+                    cls.classId === classInfo.classId
+                      ? {
+                          ...cls,
+                          hasActiveSession: !!activeSession,
+                          location: activeSession?.location || null,
+                          sessionId: activeSession?.sessionId || undefined,
+                        }
+                      : cls
+                  )
+                );
+                // Consider setting loading to false only after first session update batch completes?
+                // For simplicity, we set it false once after initial details fetch is done.
+              },
+              (error) => {
+                console.error(
+                  `Error listening to sessions for class ${classInfo.classId}:`,
+                  error
+                );
+                // Optionally remove the class or show an error state for it
+                // Ensure loading is false even if a session listener fails
+                setLoading(false);
+              }
+            );
+            sessionListenersRef.current[classInfo.classId] = sessionUnsubscribe;
+          }
+        });
+        // Initial data fetch complete, subsequent updates handled by listeners
         setLoading(false);
-      }
+      },
+      handleSubscriptionError // Pass the error handler
     );
 
     // Cleanup function for the main effect
     return () => {
-      userClassesUnsubscribe(); // Unsubscribe from userClasses
-      sessionListeners.forEach((unsubscribe) => unsubscribe()); // Unsubscribe from all session listeners
+      console.log(
+        `[useUserClasses] Cleaning up listeners for userId: ${userId}`
+      );
+      if (userClassesUnsubscribe) {
+        userClassesUnsubscribe();
+        console.log("[useUserClasses] Unsubscribed from user classes list.");
+      }
+      // Unsubscribe from all active session listeners
+      Object.values(sessionListenersRef.current).forEach((unsubscribe) =>
+        unsubscribe()
+      );
+      sessionListenersRef.current = {};
+      console.log("[useUserClasses] Unsubscribed from all session listeners.");
     };
-  }, [userId, db]); // Add db to dependency array
+  }, [userId, handleSubscriptionError]); // db removed as dependency if not used directly
 
   return { classes, loading };
 }
