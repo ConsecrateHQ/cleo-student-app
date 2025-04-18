@@ -19,8 +19,16 @@ import {
   // Types are typically accessed via the namespace
   // QuerySnapshot, // No - use FirebaseFirestoreTypes.QuerySnapshot
   // DocumentSnapshot, // No - use FirebaseFirestoreTypes.DocumentSnapshot
+  updateDoc,
+  setDoc,
+  GeoPoint, // Import GeoPoint directly
 } from "@react-native-firebase/firestore";
 import { UserClass } from "../hooks/useUserClasses"; // Assuming UserClass interface is needed here or define locally
+import {
+  validateLocationForSession,
+  isWithinRadius,
+  calculateDistance,
+} from "../utils/locationHelpers";
 
 const db = getFirestore(); // Get Firestore instance
 
@@ -540,5 +548,178 @@ export async function getStudentAttendanceHistory(
       error
     );
     throw new Error("Failed to retrieve attendance history.");
+  }
+}
+
+/**
+ * Records a student's check-in to an active session.
+ * Creates an entry in the /sessions/{sessionId}/attendance/{studentId} subcollection.
+ *
+ * @param sessionId The ID of the session to check into.
+ * @param studentId The ID of the student checking in.
+ * @param locationData The student's current location data.
+ * @returns A promise that resolves when the check-in is recorded.
+ * @throws If the session does not exist or student cannot check in.
+ */
+export async function checkInToSession(
+  sessionId: string,
+  studentId: string,
+  locationData: { latitude: number; longitude: number }
+): Promise<void> {
+  if (!sessionId || !studentId) {
+    throw new Error("Session ID and Student ID are required.");
+  }
+
+  try {
+    // 1. Get the session data to verify it's active and get the classId
+    const sessionRef = doc(db, "sessions", sessionId);
+    const sessionSnap = await getDoc(sessionRef);
+
+    if (!sessionSnap.exists) {
+      throw new Error(`Session ${sessionId} not found.`);
+    }
+
+    const sessionData = sessionSnap.data();
+    if (!sessionData || sessionData.status !== "active") {
+      throw new Error(`Session ${sessionId} is not active.`);
+    }
+
+    const classId = sessionData.classId;
+    if (!classId) {
+      throw new Error(`Session ${sessionId} has no classId.`);
+    }
+
+    // 2. Verify student is enrolled in the class
+    const studentInClassRef = doc(
+      db,
+      "classes",
+      classId,
+      "students",
+      studentId
+    );
+    const studentInClassSnap = await getDoc(studentInClassRef);
+
+    if (!studentInClassSnap.exists) {
+      throw new Error(
+        `Student ${studentId} is not enrolled in class ${classId}.`
+      );
+    }
+
+    // 3. Create GeoPoint from location data
+    // Use the directly imported GeoPoint constructor
+    const checkInLocation = new GeoPoint(
+      locationData.latitude,
+      locationData.longitude
+    );
+
+    // 4. Verify location is within the session's radius (if location validation is required)
+    let isGpsVerified = false;
+    if (sessionData.location && typeof sessionData.radius === "number") {
+      // Use location helper to validate
+      const distance = calculateDistance(
+        {
+          latitude: sessionData.location.latitude,
+          longitude: sessionData.location.longitude,
+        },
+        locationData
+      );
+      isGpsVerified = distance <= sessionData.radius;
+    }
+
+    // 5. Create attendance record
+    const attendanceRef = doc(
+      db,
+      "sessions",
+      sessionId,
+      "attendance",
+      studentId
+    );
+
+    // Check if an attendance record already exists
+    const attendanceSnap = await getDoc(attendanceRef);
+
+    // Prepare the attendance data
+    const attendanceData = {
+      classId: classId,
+      checkInTime: serverTimestamp(),
+      checkInLocation: checkInLocation,
+      status: isGpsVerified ? "verified" : "failed_location",
+      isGpsVerified: isGpsVerified,
+      lastUpdated: serverTimestamp(),
+    };
+
+    // Create or update the record
+    if (attendanceSnap.exists) {
+      // Update existing record if student is re-checking in
+      const batch = writeBatch(db);
+      batch.update(attendanceRef, attendanceData);
+      await batch.commit();
+    } else {
+      // Create new attendance record
+      const batch = writeBatch(db);
+      batch.set(attendanceRef, attendanceData);
+      await batch.commit();
+    }
+
+    console.log(
+      `Student ${studentId} checked in to session ${sessionId} with status: ${
+        isGpsVerified ? "verified" : "failed_location"
+      }`
+    );
+  } catch (error) {
+    console.error(`Error checking in to session ${sessionId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Records a student's early check-out from an active session.
+ * Updates the entry in the /sessions/{sessionId}/attendance/{studentId} subcollection.
+ *
+ * @param sessionId The ID of the session to check out from.
+ * @param studentId The ID of the student checking out.
+ * @returns A promise that resolves when the check-out is recorded.
+ * @throws If the session does not exist or student is not checked in.
+ */
+export async function checkOutFromSession(
+  sessionId: string,
+  studentId: string
+): Promise<void> {
+  if (!sessionId || !studentId) {
+    throw new Error("Session ID and Student ID are required.");
+  }
+
+  try {
+    // 1. Verify the attendance record exists
+    const attendanceRef = doc(
+      db,
+      "sessions",
+      sessionId,
+      "attendance",
+      studentId
+    );
+    const attendanceSnap = await getDoc(attendanceRef);
+
+    if (!attendanceSnap.exists) {
+      throw new Error(
+        `No attendance record found for student ${studentId} in session ${sessionId}.`
+      );
+    }
+
+    // 2. Update the attendance record with check-out status and time
+    const batch = writeBatch(db);
+    batch.update(attendanceRef, {
+      status: "checked_out_early_before_verification", // Use the new status
+      checkOutTime: serverTimestamp(), // Add the check-out timestamp
+      lastUpdated: serverTimestamp(),
+    });
+    await batch.commit();
+
+    console.log(
+      `Student ${studentId} checked out early from session ${sessionId}`
+    );
+  } catch (error) {
+    console.error(`Error checking out from session ${sessionId}:`, error);
+    throw error;
   }
 }

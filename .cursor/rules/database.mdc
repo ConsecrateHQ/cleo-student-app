@@ -1,5 +1,5 @@
 ---
-description: 
+description: Anything that has to do with the database. This is its schema.
 globs: 
 alwaysApply: false
 ---
@@ -36,8 +36,9 @@ alwaysApply: false
  // Document ID is the student's userId
  classId: String // Keep for potential cross-session queries per student per class
  checkInTime: Timestamp | null // Timestamp when the student attempted check-in
+ checkOutTime: Timestamp | null // If the students checks out early, 
  checkInLocation: GeoPoint | null // GeoPoint where the student attempted check-in
- status: String // 'pending' | 'checked_in' | 'verified' | 'failed_location' | 'failed_other' | 'absent'
+ status: String // 'pending' | 'checked_in' | 'verified' | 'failed_location' | 'failed_other' | 'absent' | ‘checked_out_early_before_verification’ |
  isGpsVerified: Boolean // Flag indicating if GPS proximity check passed
  // isFaceIdVerified: Boolean // Keep commented out or remove if not part of MVP
  lastUpdated: Timestamp // Firestore Timestamp of the last update to this record

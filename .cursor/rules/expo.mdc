@@ -7,4 +7,4 @@ The app we are building is an attendance checking app that uses GPS to check whe
 
 The ClassCard component are only boilerplates for now, when writing code, don't make use of them.
 
-Make sure you use the new Firebase V9 syntax.
+Make sure you use the new Firebase V9 syntax. There are a bunch of custom hooks and helper functions. Make use of them instead of writing new functions that does the same thing as the already implemented functions. But of course, only look at them if you need to.
