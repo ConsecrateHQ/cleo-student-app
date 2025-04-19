@@ -123,6 +123,7 @@ const App = () => {
     animatedNewTextStyle,
     animatedCircleStyle,
     startAnimation,
+    isCancelVisible,
   } = useFireflyAnimation();
 
   // Class session checker hook
@@ -229,41 +230,91 @@ const App = () => {
   const user = useAuthStore((state) => state.user);
   const [devMenuVisible, setDevMenuVisible] = useState(false);
   const insets = useSafeAreaInsets();
+  // Ref to store the stop animation function
+  const stopAnimationFnRef = useRef<
+    ((reason?: string, callback?: () => void) => boolean) | null
+  >(null);
+  // State to track if check-in was cancelled by the user
+  const [isCheckInCancelled, setIsCheckInCancelled] = useState(false);
+  // Ref to signal cancellation to the checkSessions function
+  const checkCancellationRef = useRef({ cancelled: false });
 
   // Handle check-in button press
   const handleCheckInPress = async () => {
     if (isAnimating || isChecking) return;
 
-    let animationStopFunction: ((callback?: () => void) => boolean) | undefined;
+    setIsCheckInCancelled(false); // Reset cancellation flag
+    checkCancellationRef.current.cancelled = false; // Reset cancellation ref
 
-    animationStopFunction = startAnimation(
-      () => {
-        console.log("Animation completed naturally");
+    stopAnimationFnRef.current = startAnimation(
+      // onComplete callback for animation
+      (reason) => {
+        console.log(`Animation completed/stopped naturally: ${reason}`);
+        stopAnimationFnRef.current = null; // Clear ref when animation ends
       },
+      // onMinMovesDone callback
       () => {
-        console.log("Minimum moves completed");
+        console.log("Minimum animation moves completed");
       },
-      10000
+      10000 // Timeout
     );
 
     try {
-      const result = await checkSessions();
-      setPendingCheckResult(result);
+      // Pass the cancellation ref to checkSessions
+      const result = await checkSessions(checkCancellationRef);
 
-      if (animationStopFunction) {
-        const stopped = animationStopFunction(() => {
-          console.log("Firefly returned home");
-        });
-        console.log("Animation stop attempted:", stopped);
+      // Check if the process was cancelled *before* stopping animation/setting result
+      if (!checkCancellationRef.current.cancelled) {
+        if (stopAnimationFnRef.current) {
+          // Attempt to stop the animation early as the check is complete
+          const stopped = stopAnimationFnRef.current("early", () => {
+            console.log("Firefly returned home after early stop.");
+          });
+          console.log("Attempted early animation stop:", stopped);
+          // Only set result if animation was successfully stopped or allowed to stop early
+          if (stopped) {
+            setPendingCheckResult(result);
+          } else {
+            // If stop was ignored (e.g., min moves not met), wait for natural completion
+            // The onComplete handler will clear the ref.
+            // We still need to process the result unless cancelled.
+            if (!checkCancellationRef.current.cancelled) {
+              setPendingCheckResult(result);
+            }
+          }
+        } else {
+          // Animation already stopped (completed/timed out/cancelled before checkSessions finished)
+          // Only set result if not cancelled during checkSessions await
+          if (!checkCancellationRef.current.cancelled) {
+            setPendingCheckResult(result);
+            console.log("Animation already stopped, setting check result.");
+          }
+        }
+      } else {
+        console.log("Check-in was cancelled, ignoring result.");
+        // Ensure animation is stopped if it hasn't already been
+        if (stopAnimationFnRef.current) {
+          stopAnimationFnRef.current("cancelled");
+        }
       }
     } catch (error) {
       console.error("Error during check-in:", error);
-      setPendingCheckResult({
-        success: false,
-        message: "Location check failed.",
-        isAttending: false,
-      });
-      if (animationStopFunction) animationStopFunction();
+      // Only show error and stop animation if not cancelled by user
+      if (!checkCancellationRef.current.cancelled) {
+        setPendingCheckResult({
+          success: false,
+          message: "Location check failed.",
+          isAttending: false,
+        });
+        if (stopAnimationFnRef.current) {
+          stopAnimationFnRef.current("error"); // Stop animation due to error
+        }
+      }
+    } finally {
+      // Ref should be nullified by the onComplete callback in startAnimation
+      // If the process errors out before onComplete fires, ensure it's cleared
+      // Although, calling stopAnimationFnRef should trigger onComplete anyway.
+      // stopAnimationFnRef.current = null; // This might be redundant
     }
   };
 
@@ -329,6 +380,18 @@ const App = () => {
         },
       ]
     );
+  };
+
+  // Handle cancel button press
+  const handleCancelPress = () => {
+    setIsCheckInCancelled(true); // Set the cancellation flag
+    checkCancellationRef.current.cancelled = true; // Set the cancellation ref
+
+    if (stopAnimationFnRef.current) {
+      console.log("User cancelled check-in animation.");
+      stopAnimationFnRef.current("cancelled"); // Call the stop function with 'cancelled' reason
+      // The onComplete handler in startAnimation will set the ref to null
+    }
   };
 
   console.log("Is DEV mode?", __DEV__);
@@ -399,6 +462,26 @@ const App = () => {
           visible={devMenuVisible}
           onClose={() => setDevMenuVisible(false)}
         />
+
+        {/* Cancel Button - Renders conditionally during check-in animation */}
+        {isCancelVisible && (
+          <Animated.View
+            style={[
+              styles.cancelButtonContainer, // Use a similar positioning style
+              { bottom: Math.max(insets.bottom + 140, 140 + 16) },
+            ]}
+            entering={FadeIn.duration(300)}
+            exiting={FadeOut.duration(300)}
+          >
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancelPress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
       </SafeAreaView>
     </GestureHandlerRootView>
   );
@@ -430,6 +513,29 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: "#fff",
+  },
+  cancelButtonContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 10, // Ensure it's above the bottom sheet handle maybe?
+  },
+  cancelButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    backgroundColor: theme.colors.status.error,
+    borderRadius: 25,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  cancelButtonText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
   },
   // All other styles specific to ActiveSessionDisplay, CheckInButton,
   // ThisWeekSheetContent, and DevToolsButtons have been moved

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   getActiveSessionsForStudent,
   getStudentClasses,
@@ -37,22 +37,58 @@ interface ActiveSessionData {
 }
 
 /**
- * Simulates network latency in DEV mode
+ * Simulates network latency in DEV mode, interruptible by cancellationRef
+ * @param cancellationRef Ref object to check for cancellation signal
  * @param minSeconds Minimum delay in seconds
  * @param maxSeconds Maximum delay in seconds
- * @returns Promise that resolves after the delay
+ * @returns Promise that resolves after the delay or rejects if cancelled
  */
-const mockDelay = async (minSeconds = 1, maxSeconds = 7): Promise<void> => {
+const mockDelay = (
+  cancellationRef: React.MutableRefObject<{ cancelled: boolean }>,
+  minSeconds = 1,
+  maxSeconds = 7
+): Promise<void> => {
   // Only simulate delay in DEV mode
   if (!__DEV__) return Promise.resolve();
 
   // Generate random delay between minSeconds and maxSeconds
-  const delayMs =
+  const totalDelayMs =
     Math.floor(Math.random() * (maxSeconds - minSeconds + 1) + minSeconds) *
     1000;
-  console.log(`[DEV] Simulating network latency: ${delayMs / 1000}s`);
+  console.log(
+    `[DEV][mockDelay] Simulating network latency: ${totalDelayMs / 1000}s`
+  );
 
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
+  return new Promise((resolve, reject) => {
+    let elapsedTime = 0;
+    const intervalTime = 100; // Check every 100ms
+    let intervalId: NodeJS.Timeout | null = null;
+
+    const checkCancellation = () => {
+      if (cancellationRef.current.cancelled) {
+        console.log("[DEV][mockDelay] Delay cancelled.");
+        if (intervalId) clearInterval(intervalId);
+        reject(new Error("Delay cancelled")); // Reject promise on cancellation
+        return true;
+      }
+      return false;
+    };
+
+    if (checkCancellation()) return;
+
+    intervalId = setInterval(() => {
+      if (checkCancellation()) return;
+
+      elapsedTime += intervalTime;
+      // console.log(`[DEV][mockDelay] Elapsed: ${elapsedTime}ms / ${totalDelayMs}ms`); // Optional: verbose logging
+
+      if (elapsedTime >= totalDelayMs) {
+        console.log("[DEV][mockDelay] Delay completed.");
+        if (intervalId) clearInterval(intervalId);
+        resolve();
+      }
+    }, intervalTime);
+  });
 };
 
 export interface SessionCheckResult {
@@ -60,6 +96,7 @@ export interface SessionCheckResult {
   message: string;
   isAttending: boolean;
   sessionId?: string; // Optional session ID when attending a class
+  cancelled?: boolean; // Add flag for user cancellation
 }
 
 export const useClassSessionChecker = () => {
@@ -76,7 +113,8 @@ export const useClassSessionChecker = () => {
    */
   const checkAttendanceByLocation = async (
     studentLocation: { latitude: number; longitude: number },
-    activeSessions: ActiveSessionData[]
+    activeSessions: ActiveSessionData[],
+    cancellationRef: React.MutableRefObject<{ cancelled: boolean }>
   ) => {
     // Default values
     let isAttending = false;
@@ -85,9 +123,24 @@ export const useClassSessionChecker = () => {
 
     // Check each active session to see if student is within attendance radius
     for (const session of activeSessions) {
+      if (cancellationRef.current.cancelled) {
+        console.log(
+          "[checkAttendanceByLocation] Cancelled during session loop."
+        );
+        return { isAttending: false, attendingClass: null, cancelled: true };
+      }
+
       if (session.location) {
         // Log class name for debugging
         const classDetails = await getClassDetails(session.classId);
+
+        if (cancellationRef.current.cancelled) {
+          console.log(
+            "[checkAttendanceByLocation] Cancelled after fetching class details."
+          );
+          return { isAttending: false, attendingClass: null, cancelled: true };
+        }
+
         const className = classDetails?.name || "Unknown Class";
 
         console.log(`Checking ${className}:`);
@@ -135,7 +188,7 @@ export const useClassSessionChecker = () => {
       );
     }
 
-    return { isAttending, attendingClass };
+    return { isAttending, attendingClass, cancelled: false };
   };
 
   /**
@@ -148,8 +201,8 @@ export const useClassSessionChecker = () => {
    * @returns Formatted message string
    */
   const formatAttendanceMessage = (
-    enrolledClasses: ClassDetails[],
-    classesWithActiveSessions: ClassDetails[],
+    enrolledClasses: (ClassDetails | null)[],
+    classesWithActiveSessions: (ClassDetails | null)[],
     isAttending: boolean,
     attendingClass: ClassDetails | null
   ): string => {
@@ -174,9 +227,11 @@ export const useClassSessionChecker = () => {
     if (enrolledClasses.length === 0) {
       detailedInfo += "- None\n";
     } else {
-      enrolledClasses.forEach((cls, index) => {
-        detailedInfo += `- ${index + 1}. ${cls.name}\n`;
-      });
+      enrolledClasses
+        .filter((cls) => cls !== null)
+        .forEach((cls, index) => {
+          detailedInfo += `- ${index + 1}. ${cls!.name}\n`;
+        });
     }
 
     // Classes with active sessions
@@ -184,16 +239,20 @@ export const useClassSessionChecker = () => {
     if (classesWithActiveSessions.length === 0) {
       detailedInfo += "- None\n";
     } else {
-      classesWithActiveSessions.forEach((cls, index) => {
-        detailedInfo += `- ${index + 1}. ${cls.name}\n`;
-      });
+      classesWithActiveSessions
+        .filter((cls) => cls !== null)
+        .forEach((cls, index) => {
+          detailedInfo += `- ${index + 1}. ${cls!.name}\n`;
+        });
     }
 
     // Return only the attendance status for display
     return attendanceStatus;
   };
 
-  const checkSessions = async (): Promise<SessionCheckResult> => {
+  const checkSessions = async (
+    cancellationRef: React.MutableRefObject<{ cancelled: boolean }>
+  ): Promise<SessionCheckResult> => {
     if (!user?.uid) {
       return {
         success: false,
@@ -205,8 +264,50 @@ export const useClassSessionChecker = () => {
     setIsChecking(true);
 
     try {
-      // Add mock delay in DEV mode to simulate network latency
-      await mockDelay();
+      // Check for cancellation early
+      if (cancellationRef.current.cancelled) {
+        console.log(
+          "[useClassSessionChecker] Check cancelled before starting."
+        );
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
+
+      // Add mock delay in DEV mode - now interruptible
+      try {
+        await mockDelay(cancellationRef); // Pass the ref
+      } catch (delayError: any) {
+        if (delayError.message === "Delay cancelled") {
+          // If delay was cancelled, return the cancelled state immediately
+          console.log("[useClassSessionChecker] Caught delay cancellation.");
+          return {
+            success: false,
+            message: "Check-in cancelled.",
+            isAttending: false,
+            cancelled: true,
+          };
+        } else {
+          // Handle other potential errors from mockDelay if any
+          throw delayError;
+        }
+      }
+
+      // *** Check cancellation immediately after delay attempt ***
+      if (cancellationRef.current.cancelled) {
+        console.log(
+          "[useClassSessionChecker] Check cancelled after initial delay."
+        );
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
 
       // Get all classes the student is enrolled in
       const studentClasses: BaseUserClassInfo[] = await getStudentClasses(
@@ -218,32 +319,75 @@ export const useClassSessionChecker = () => {
         await getActiveSessionsForStudent(user.uid);
 
       // Get class details for enrolled classes
-      const enrolledClassDetails: ClassDetails[] = await Promise.all(
-        studentClasses.map(async (cls) => {
-          const details = await getClassDetails(cls.classId);
-          return (
-            details || {
-              classId: cls.classId,
-              name: cls.className,
-              teacherId: "",
-            }
+      const enrolledClassDetailsPromises = studentClasses.map(async (cls) => {
+        if (cancellationRef.current.cancelled) return null;
+
+        const details = await getClassDetails(cls.classId);
+
+        if (cancellationRef.current.cancelled) return null;
+
+        return (
+          details || {
+            classId: cls.classId,
+            name: cls.className,
+            teacherId: "",
+          }
+        );
+      });
+
+      let enrolledClassDetails: (ClassDetails | null)[] = [];
+      if (!cancellationRef.current.cancelled) {
+        enrolledClassDetails = await Promise.all(enrolledClassDetailsPromises);
+        // Filter out nulls potentially caused by cancellation during Promise.all
+        enrolledClassDetails = enrolledClassDetails.filter((d) => d !== null);
+        // Final check after all details are fetched
+        if (cancellationRef.current.cancelled) {
+          console.log(
+            "[useClassSessionChecker] Cancelled after fetching enrolled class details."
           );
-        })
-      );
+          return {
+            success: false,
+            message: "Check-in cancelled.",
+            isAttending: false,
+            cancelled: true,
+          };
+        }
+      }
 
       // Get class details for classes with active sessions
-      const activeClassDetails: ClassDetails[] = await Promise.all(
-        activeSessions.map(async (session) => {
-          const details = await getClassDetails(session.classId);
-          return (
-            details || {
-              classId: session.classId,
-              name: "Unknown Class",
-              teacherId: "",
-            }
+      const activeClassDetailsPromises = activeSessions.map(async (session) => {
+        if (cancellationRef.current.cancelled) return null;
+
+        const details = await getClassDetails(session.classId);
+
+        if (cancellationRef.current.cancelled) return null;
+
+        return (
+          details || {
+            classId: session.classId,
+            name: "Unknown Class",
+            teacherId: "",
+          }
+        );
+      });
+
+      let activeClassDetails: (ClassDetails | null)[] = [];
+      if (!cancellationRef.current.cancelled) {
+        activeClassDetails = await Promise.all(activeClassDetailsPromises);
+        activeClassDetails = activeClassDetails.filter((d) => d !== null);
+        // Final check after all details are fetched
+        if (cancellationRef.current.cancelled) {
+          console.log(
+            "[useClassSessionChecker] Cancelled after fetching active class details."
           );
-        })
-      );
+          return {
+            success: false,
+            message: "Check-in cancelled.",
+            isAttending: false,
+            cancelled: true,
+          };
+        }
+      }
 
       // Default values if location check is not possible
       let isAttending = false;
@@ -277,8 +421,22 @@ export const useClassSessionChecker = () => {
 
       const attendanceStatus = await checkAttendanceByLocation(
         studentCoords,
-        activeSessions
+        activeSessions,
+        cancellationRef
       );
+
+      // Check if checkAttendanceByLocation itself was cancelled
+      if (attendanceStatus.cancelled) {
+        console.log(
+          "[useClassSessionChecker] Location check was cancelled internally."
+        );
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
 
       isAttending = attendanceStatus.isAttending;
       attendingClass = attendanceStatus.attendingClass;
@@ -303,6 +461,19 @@ export const useClassSessionChecker = () => {
       // --- Add check-in logic ---
       if (isAttending && sessionId && user?.uid) {
         try {
+          // Final check before writing to DB
+          if (cancellationRef.current.cancelled) {
+            console.log(
+              "[useClassSessionChecker] Check cancelled just before writing check-in."
+            );
+            return {
+              success: false,
+              message: "Check-in cancelled.",
+              isAttending: false,
+              cancelled: true,
+            };
+          }
+
           console.log(
             `Attempting to automatically check in student ${user.uid} to session ${sessionId}`
           );
@@ -333,17 +504,34 @@ export const useClassSessionChecker = () => {
         success: true,
         message,
         isAttending,
-        sessionId,
+        sessionId: isAttending ? sessionId : undefined, // Only return sessionId if attending
       };
     } catch (error) {
       console.error("Error checking sessions:", error);
+      // Check if error occurred *after* cancellation
+      if (cancellationRef.current.cancelled) {
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
       return {
         success: false,
         message: "Could not check sessions. Please try again.",
         isAttending: false,
       };
     } finally {
-      setIsChecking(false);
+      // Only set isChecking to false if not cancelled, to prevent UI flicker if cancel happens fast
+      // Although, the cancel button should ideally disappear immediately anyway.
+      if (!cancellationRef.current.cancelled) {
+        setIsChecking(false);
+      } else {
+        // If cancelled, ensure the loading state is definitively turned off.
+        // It's possible setIsChecking(false) in the cancel handler runs slightly later.
+        setIsChecking(false);
+      }
     }
   };
 
