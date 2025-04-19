@@ -231,6 +231,9 @@ export const useClassSessionChecker = () => {
     // First determine the final attendance status message
     let attendanceStatus = "";
     if (isAttending && attendingClass) {
+      console.log(
+        `ATTENDANCE SUCCESS: Student is attending ${attendingClass.name}.`
+      );
       attendanceStatus = `Student is attending ${attendingClass.name}.`;
     } else {
       attendanceStatus = "Student currently doesn't attend any sessions.";

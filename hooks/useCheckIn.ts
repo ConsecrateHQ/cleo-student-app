@@ -283,10 +283,23 @@ export const useCheckIn = (): UseCheckInResult => {
   // Add function to reset cancellation state
   const resetCancellationState = () => {
     console.log("Explicitly resetting cancellation state flags");
+
+    // Only clear pending result if there isn't a successful result waiting
+    if (!pendingResultRef.current || !pendingResultRef.current.isAttending) {
+      console.log("No successful result pending, clearing all state");
+      pendingResultRef.current = null;
+      setPendingCheckResult(null);
+    } else {
+      console.log("Successful result pending, preserving it during reset");
+      // Set the pending result to state if it hasn't been set yet
+      if (pendingResultRef.current && !pendingCheckResult) {
+        console.log("Setting successful pending result during reset");
+        setPendingCheckResult(pendingResultRef.current);
+      }
+    }
+
     setIsCheckInCancelled(false);
     checkCancellationRef.current.cancelled = false;
-    pendingResultRef.current = null;
-    setPendingCheckResult(null);
     checkInProgressRef.current = false;
     minMovesCompletedRef.current = false;
   };
