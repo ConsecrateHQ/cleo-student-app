@@ -22,14 +22,6 @@
           }
         },
         {
-          "client_id": "48288193953-pkpqocfcd9mcua4togvkguahcv8u5k0a.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.joshtrung.cleo",
-            "certificate_hash": "caaa670f8b0acdb6c397d7564c56804aa5d8d763"
-          }
-        },
-        {
           "client_id": "48288193953-qabq45adf4lbsscfk4oc6rkv55m16trj.apps.googleusercontent.com",
           "client_type": 3
         }

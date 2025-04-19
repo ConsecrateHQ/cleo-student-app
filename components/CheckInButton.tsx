@@ -20,24 +20,32 @@ import Animated, {
   cancelAnimation,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
+import JoinClassModal from "./JoinClassModal";
 
 interface CheckInButtonProps {
   isCheckingIn: boolean;
   isActiveSession: boolean;
   onPress: () => void;
+  onLongPress?: () => void;
   animatedTextStyle: StyleProp<Animated.AnimateStyle<StyleProp<TextStyle>>>;
   animatedNewTextStyle: StyleProp<Animated.AnimateStyle<StyleProp<TextStyle>>>;
   animatedCircleStyle: StyleProp<Animated.AnimateStyle<StyleProp<ViewStyle>>>;
+  onJoinClass?: (code: string) => Promise<void>;
 }
 
 const CheckInButton: React.FC<CheckInButtonProps> = ({
   isCheckingIn,
   isActiveSession,
   onPress,
+  onLongPress,
   animatedTextStyle,
   animatedNewTextStyle,
   animatedCircleStyle,
+  onJoinClass,
 }) => {
+  // Add state for join modal
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
+
   // Add local transition for better state handling
   const activeOpacity = useSharedValue(0);
   const statusTextOpacity = useSharedValue(1);
@@ -189,60 +197,95 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
     transform: [{ scale: breathingScale.value }],
   }));
 
+  // Handle long press to show join modal
+  const handleLongPress = () => {
+    if (!isCheckingIn && !isActiveSession) {
+      console.log("Long press detected - opening join modal");
+      setJoinModalVisible(true);
+      if (onLongPress) {
+        onLongPress();
+      }
+    }
+  };
+
+  const handleJoinSubmit = async (code: string) => {
+    console.log("Attempting to join class with code:", code);
+    if (onJoinClass) {
+      try {
+        return await onJoinClass(code);
+      } catch (err) {
+        console.error("Error joining class:", err);
+        throw err;
+      }
+    }
+    throw new Error("No join handler provided");
+  };
+
   // Determine which text should be visible based on current state
   const idleTextVisible = !isActiveSession && !isCheckingIn;
   const checkingTextVisible = isCheckingIn;
 
   return (
-    <View style={styles.centerCircleContainer} pointerEvents="box-none">
-      <View style={styles.textContainer}>
-        {/* Idle state text - ALWAYS render but control visibility with opacity */}
-        <Animated.Text
-          style={[
-            styles.checkInText,
-            animatedStatusTextStyle,
-            animatedTextStyle,
-            { opacity: idleTextVisible ? 1 : 0 },
-            // Use pointerEvents to prevent interaction when invisible
-            !idleTextVisible && { position: "absolute" },
-          ]}
-        >
-          Tap to Check In
-        </Animated.Text>
-
-        {/* Loading text - ALWAYS render but control visibility with opacity */}
-        <Animated.Text
-          style={[
-            styles.checkInText,
-            animatedNewTextStyle,
-            { opacity: checkingTextVisible ? 1 : 0 },
-            // Use pointerEvents to prevent interaction when invisible
-            !checkingTextVisible && { position: "absolute" },
-          ]}
-        >
-          Getting you in...
-        </Animated.Text>
-      </View>
-      <Animated.View style={animatedCircleStyle}>
-        <Animated.View style={animatedBreathingStyle}>
-          <TouchableOpacity
+    <>
+      <View style={styles.centerCircleContainer} pointerEvents="box-none">
+        <View style={styles.textContainer}>
+          {/* Idle state text - ALWAYS render but control visibility with opacity */}
+          <Animated.Text
             style={[
-              styles.checkInCircle,
-              isActiveSession ? styles.checkInCircleActive : {},
+              styles.checkInText,
+              animatedStatusTextStyle,
+              animatedTextStyle,
+              { opacity: idleTextVisible ? 1 : 0 },
+              // Use pointerEvents to prevent interaction when invisible
+              !idleTextVisible && { position: "absolute" },
             ]}
-            activeOpacity={0.7}
-            onPress={onPress}
-            disabled={isCheckingIn || isActiveSession}
           >
-            <Animated.View
-              style={[styles.checkInActiveIndicator, animatedCheckStyle]}
+            Tap to Check In
+          </Animated.Text>
+
+          {/* Loading text - ALWAYS render but control visibility with opacity */}
+          <Animated.Text
+            style={[
+              styles.checkInText,
+              animatedNewTextStyle,
+              { opacity: checkingTextVisible ? 1 : 0 },
+              // Use pointerEvents to prevent interaction when invisible
+              !checkingTextVisible && { position: "absolute" },
+            ]}
+          >
+            Getting you in...
+          </Animated.Text>
+        </View>
+        <Animated.View style={animatedCircleStyle}>
+          <Animated.View style={animatedBreathingStyle}>
+            <TouchableOpacity
+              style={[
+                styles.checkInCircle,
+                isActiveSession ? styles.checkInCircleActive : {},
+              ]}
+              activeOpacity={0.7}
+              onPress={onPress}
+              onLongPress={handleLongPress}
+              delayLongPress={500}
+              disabled={isCheckingIn || isActiveSession}
             >
-              <Ionicons name="checkmark" size={36} color="#4CAF50" />
-            </Animated.View>
-          </TouchableOpacity>
+              <Animated.View
+                style={[styles.checkInActiveIndicator, animatedCheckStyle]}
+              >
+                <Ionicons name="checkmark" size={36} color="#4CAF50" />
+              </Animated.View>
+            </TouchableOpacity>
+          </Animated.View>
         </Animated.View>
-      </Animated.View>
-    </View>
+      </View>
+
+      {/* Join Class Modal */}
+      <JoinClassModal
+        visible={joinModalVisible}
+        onClose={() => setJoinModalVisible(false)}
+        onSubmit={handleJoinSubmit}
+      />
+    </>
   );
 };
 
