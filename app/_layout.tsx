@@ -71,6 +71,13 @@ export default function RootLayout() {
             presentation: "card",
           }}
         />
+        <Stack.Screen
+          name="join-class"
+          options={{
+            headerShown: false,
+            presentation: "card",
+          }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );
