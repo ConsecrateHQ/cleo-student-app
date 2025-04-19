@@ -17,6 +17,8 @@ import CancelButton from "../components/CancelButton";
 import HomeBottomSheet from "../components/HomeBottomSheet";
 import { useCheckIn } from "../hooks/useCheckIn";
 import { useActiveSession } from "../hooks/useActiveSession";
+import { useSessionStatusListener } from "../hooks/useSessionStatusListener";
+import CongratulationsDrawer from "../components/CongratulationsDrawer";
 
 const App = () => {
   // Refs and basic setup
@@ -34,7 +36,15 @@ const App = () => {
     animations: sessionAnimations,
     showActiveSessionElements,
     handleLeaveEarlyPress,
+    setActiveSession,
   } = useActiveSession();
+
+  // Session status listener hook
+  const {
+    showCongratulations,
+    hideCongratulations,
+    className: endedClassName,
+  } = useSessionStatusListener(activeSession.sessionId || null);
 
   const {
     isChecking,
@@ -154,14 +164,19 @@ const App = () => {
       }
 
       // Show active session UI
-      try {
-        console.log("Showing active session elements...");
-        showActiveSessionElements(className, sessionIdMatch);
-        console.log("Active session state updated successfully");
-      } catch (error) {
-        console.error("Error updating active session state:", error);
-        Alert.alert("Error", "Something went wrong processing your check-in.");
-      }
+      (async () => {
+        try {
+          console.log("Showing active session elements...");
+          await showActiveSessionElements(className, sessionIdMatch);
+          console.log("Active session state updated successfully");
+        } catch (error) {
+          console.error("Error updating active session state:", error);
+          Alert.alert(
+            "Error",
+            "Something went wrong processing your check-in."
+          );
+        }
+      })();
     } else if (pendingCheckResult.success === false) {
       Alert.alert("Error", pendingCheckResult.message);
     }
@@ -176,6 +191,52 @@ const App = () => {
   const handleSheetChanges = useCallback((index: number) => {
     console.log("handleSheetChanges", index);
   }, []);
+
+  // Inside the App component, add a new handler function:
+  const handleSessionEndComplete = useCallback(() => {
+    // First hide the congratulations drawer
+    hideCongratulations();
+
+    // Then reset the session state - but skip the confirmation dialog
+    // since the session has already ended
+    if (activeSession.isActive && activeSession.sessionId) {
+      console.log("Ending completed session and resetting state");
+
+      // Clear timer interval if any
+      if (activeSession.timerInterval) {
+        clearInterval(activeSession.timerInterval);
+      }
+
+      // Animate session elements out and reset state
+      sessionAnimations.classNameOpacity.value = 0;
+      sessionAnimations.classNameTranslateY.value = -20;
+      sessionAnimations.timerOpacity.value = 0;
+      sessionAnimations.timerTranslateY.value = 20;
+      sessionAnimations.leaveButtonOpacity.value = 0;
+      sessionAnimations.leaveButtonTranslateY.value = 20;
+
+      // Reset session state
+      setActiveSession({
+        isActive: false,
+        className: "",
+        sessionId: "",
+        timer: 0,
+        timerInterval: null,
+      });
+
+      // Reset other important state references
+      processedCheckRef.current = null;
+      resetCancellationState();
+
+      console.log("Session ended and reset complete");
+    }
+  }, [
+    hideCongratulations,
+    activeSession,
+    sessionAnimations,
+    setActiveSession,
+    resetCancellationState,
+  ]);
 
   console.log("Is DEV mode?", __DEV__);
 
@@ -244,6 +305,13 @@ const App = () => {
           isVisible={isCancelVisible}
           onPress={handleCancelPress}
           bottomPosition={Math.max(insets.bottom + 40, 40)}
+        />
+
+        {/* Congratulations Drawer */}
+        <CongratulationsDrawer
+          isVisible={showCongratulations}
+          className={endedClassName || activeSession.className}
+          onClose={handleSessionEndComplete}
         />
       </SafeAreaView>
     </GestureHandlerRootView>

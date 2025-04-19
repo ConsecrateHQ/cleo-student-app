@@ -723,3 +723,34 @@ export async function checkOutFromSession(
     throw error;
   }
 }
+
+/**
+ * Gets the current status of a session from Firestore.
+ *
+ * @param sessionId The ID of the session
+ * @returns A promise resolving to the session status or null if not found
+ */
+export async function getSessionStatus(
+  sessionId: string
+): Promise<string | null> {
+  if (!sessionId) {
+    console.warn("[getSessionStatus] No sessionId provided");
+    return null;
+  }
+
+  try {
+    const sessionRef = doc(db, "sessions", sessionId);
+    const sessionSnap = await getDoc(sessionRef);
+
+    if (!sessionSnap.exists) {
+      console.warn(`Session ${sessionId} does not exist`);
+      return null;
+    }
+
+    const sessionData = sessionSnap.data();
+    return sessionData?.status || null;
+  } catch (error) {
+    console.error(`Error getting status for session ${sessionId}:`, error);
+    throw error;
+  }
+}

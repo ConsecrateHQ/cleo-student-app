@@ -8,7 +8,10 @@ import {
   useAnimatedStyle,
 } from "react-native-reanimated";
 import useAuthStore from "./useAuthStore";
-import { checkOutFromSession } from "../utils/firebaseClassSessionHelpers";
+import {
+  checkOutFromSession,
+  getSessionStatus,
+} from "../utils/firebaseClassSessionHelpers";
 
 interface ActiveSessionState {
   isActive: boolean;
@@ -33,8 +36,12 @@ interface ActiveSessionAnimations {
 interface UseActiveSessionResult {
   activeSession: ActiveSessionState;
   animations: ActiveSessionAnimations;
-  showActiveSessionElements: (className: string, sessionId: string) => void;
+  showActiveSessionElements: (
+    className: string,
+    sessionId: string
+  ) => Promise<void>;
   handleLeaveEarlyPress: () => Promise<void>;
+  setActiveSession: React.Dispatch<React.SetStateAction<ActiveSessionState>>;
 }
 
 export const useActiveSession = (): UseActiveSessionResult => {
@@ -112,7 +119,10 @@ export const useActiveSession = (): UseActiveSessionResult => {
   }, []);
 
   // Show active session elements
-  const showActiveSessionElements = (className: string, sessionId: string) => {
+  const showActiveSessionElements = async (
+    className: string,
+    sessionId: string
+  ) => {
     console.log("showActiveSessionElements called with:", className, sessionId);
 
     if (!className || !sessionId) {
@@ -124,6 +134,26 @@ export const useActiveSession = (): UseActiveSessionResult => {
     if (leaveInProgressRef.current) {
       console.log("Leave in progress, ignoring showActiveSessionElements call");
       return;
+    }
+
+    // First check if the session is still active
+    try {
+      const sessionStatus = await getSessionStatus(sessionId);
+      if (sessionStatus !== "active") {
+        console.log(
+          `Cannot join session ${sessionId} with status ${sessionStatus}`
+        );
+        Alert.alert(
+          "Session Unavailable",
+          sessionStatus === "ended"
+            ? "This session has already ended."
+            : "This session is not currently active."
+        );
+        return;
+      }
+    } catch (error) {
+      console.error("Error checking session status:", error);
+      // Continue anyway in case of error to avoid blocking the user
     }
 
     if (activeSession.timerInterval) {
@@ -377,5 +407,6 @@ export const useActiveSession = (): UseActiveSessionResult => {
     },
     showActiveSessionElements,
     handleLeaveEarlyPress,
+    setActiveSession,
   };
 };
