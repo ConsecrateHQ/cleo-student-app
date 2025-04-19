@@ -15,6 +15,9 @@ import Animated, {
   withTiming,
   useAnimatedStyle,
   Easing,
+  withRepeat,
+  withSequence,
+  cancelAnimation,
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -39,6 +42,8 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
   const activeOpacity = useSharedValue(0);
   const statusTextOpacity = useSharedValue(1);
   const statusTextTranslateY = useSharedValue(0);
+  // Add breathing animation value
+  const breathingScale = useSharedValue(1);
 
   // Track previous session state to detect transitions
   const [prevIsActiveSession, setPrevIsActiveSession] =
@@ -54,6 +59,35 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
   console.log(
     `CheckInButton render - isActiveSession: ${isActiveSession}, prevIsActiveSession: ${prevIsActiveSession}, isCheckingIn: ${isCheckingIn}, prevIsCheckingIn: ${prevIsCheckingIn}`
   );
+
+  // Start or stop breathing animation based on state
+  useEffect(() => {
+    if (!isCheckingIn && !isActiveSession) {
+      // Button is idle, start breathing animation
+      console.log("Starting breathing animation");
+
+      // Using withRepeat with true for the reverse parameter will ensure
+      // smooth animation in both directions
+      breathingScale.value = withRepeat(
+        withTiming(1.1, {
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+        }),
+        -1, // Infinite repetitions
+        true // Reverse animation for smooth transition back to original size
+      );
+    } else {
+      // Button is active or checking in, stop breathing
+      console.log("Stopping breathing animation");
+      cancelAnimation(breathingScale);
+      breathingScale.value = 1;
+    }
+
+    return () => {
+      // Clean up on unmount
+      cancelAnimation(breathingScale);
+    };
+  }, [isCheckingIn, isActiveSession, breathingScale]);
 
   // Handle all state transitions in one place for better coordination
   const handleStateTransition = useCallback(() => {
@@ -150,6 +184,11 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
     transform: [{ translateY: statusTextTranslateY.value }],
   }));
 
+  // Create breathing animation style
+  const animatedBreathingStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: breathingScale.value }],
+  }));
+
   // Determine which text should be visible based on current state
   const idleTextVisible = !isActiveSession && !isCheckingIn;
   const checkingTextVisible = isCheckingIn;
@@ -185,21 +224,23 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
         </Animated.Text>
       </View>
       <Animated.View style={animatedCircleStyle}>
-        <TouchableOpacity
-          style={[
-            styles.checkInCircle,
-            isActiveSession ? styles.checkInCircleActive : {},
-          ]}
-          activeOpacity={0.7}
-          onPress={onPress}
-          disabled={isCheckingIn || isActiveSession}
-        >
-          <Animated.View
-            style={[styles.checkInActiveIndicator, animatedCheckStyle]}
+        <Animated.View style={animatedBreathingStyle}>
+          <TouchableOpacity
+            style={[
+              styles.checkInCircle,
+              isActiveSession ? styles.checkInCircleActive : {},
+            ]}
+            activeOpacity={0.7}
+            onPress={onPress}
+            disabled={isCheckingIn || isActiveSession}
           >
-            <Ionicons name="checkmark" size={36} color="#4CAF50" />
-          </Animated.View>
-        </TouchableOpacity>
+            <Animated.View
+              style={[styles.checkInActiveIndicator, animatedCheckStyle]}
+            >
+              <Ionicons name="checkmark" size={36} color="#4CAF50" />
+            </Animated.View>
+          </TouchableOpacity>
+        </Animated.View>
       </Animated.View>
     </View>
   );
