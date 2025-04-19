@@ -4,7 +4,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet from "@gorhom/bottom-sheet";
 import theme from "../theme";
 import { useSharedValue } from "react-native-reanimated";
-import DevMenu from "../components/DevMenu";
 import useAuthStore from "../hooks/useAuthStore";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useBottomSheetAnimations } from "../hooks/useBottomSheetAnimations";
@@ -27,7 +26,8 @@ const App = () => {
   const animatedPosition = useSharedValue(windowHeight);
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
-  const [devMenuVisible, setDevMenuVisible] = useState(false);
+  const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const processedCheckRef = useRef<string | null>(null);
 
   // Custom hooks
@@ -289,16 +289,7 @@ const App = () => {
         />
 
         {/* Dev Tools Buttons */}
-        <DevToolsButtons
-          onDevPress={() => setDevMenuVisible(true)}
-          onExpPress={() => router.push("/playground")}
-        />
-
-        {/* Dev Menu Modal */}
-        <DevMenu
-          visible={devMenuVisible}
-          onClose={() => setDevMenuVisible(false)}
-        />
+        <DevToolsButtons />
 
         {/* Cancel Button */}
         <CancelButton

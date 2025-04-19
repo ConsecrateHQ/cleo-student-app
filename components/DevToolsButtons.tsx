@@ -10,8 +10,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 interface DevToolsButtonsProps {
-  onDevPress: (event: GestureResponderEvent) => void;
-  onExpPress: (event: GestureResponderEvent) => void;
+  onDevPress?: (event: GestureResponderEvent) => void;
+  onExpPress?: (event: GestureResponderEvent) => void;
 }
 
 const DevToolsButtons: React.FC<DevToolsButtonsProps> = ({
@@ -22,13 +22,25 @@ const DevToolsButtons: React.FC<DevToolsButtonsProps> = ({
     return null; // Only render in development mode
   }
 
+  const handleDevPress = (event: GestureResponderEvent) => {
+    router.push("/dev");
+  };
+
+  const handleExpPress = (event: GestureResponderEvent) => {
+    if (onExpPress) {
+      onExpPress(event);
+    } else {
+      router.push("/playground");
+    }
+  };
+
   return (
     <View style={styles.topRightButtonsContainer}>
-      <TouchableOpacity style={styles.devMenuButton} onPress={onDevPress}>
+      <TouchableOpacity style={styles.devMenuButton} onPress={handleDevPress}>
         <Ionicons name="construct-outline" size={20} color="white" />
         <Text style={styles.devMenuButtonText}>Dev</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.expMenuButton} onPress={onExpPress}>
+      <TouchableOpacity style={styles.expMenuButton} onPress={handleExpPress}>
         <Ionicons name="flask-outline" size={20} color="white" />
         <Text style={styles.devMenuButtonText}>Exp.</Text>
       </TouchableOpacity>

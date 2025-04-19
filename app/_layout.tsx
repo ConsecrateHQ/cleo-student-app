@@ -64,6 +64,13 @@ export default function RootLayout() {
             presentation: "modal",
           }}
         />
+        <Stack.Screen
+          name="dev"
+          options={{
+            headerShown: false,
+            presentation: "card",
+          }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );
