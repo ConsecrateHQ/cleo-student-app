@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   getActiveSessionsForStudent,
   getStudentClasses,
@@ -104,6 +104,25 @@ export const useClassSessionChecker = () => {
   const user = useAuthStore((state) => state.user);
   const { location } = useLocation();
 
+  // Store ongoing abort controller
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  /**
+   * Cancel any ongoing check operation
+   */
+  const cancelChecking = useCallback(() => {
+    console.log(
+      "[useClassSessionChecker] Forcing cancellation of any ongoing checks"
+    );
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    setIsChecking(false);
+  }, []);
+
   /**
    * Determines if the student is attending a class session based on location
    *
@@ -114,7 +133,8 @@ export const useClassSessionChecker = () => {
   const checkAttendanceByLocation = async (
     studentLocation: { latitude: number; longitude: number },
     activeSessions: ActiveSessionData[],
-    cancellationRef: React.MutableRefObject<{ cancelled: boolean }>
+    cancellationRef: React.MutableRefObject<{ cancelled: boolean }>,
+    abortSignal: AbortSignal
   ) => {
     // Default values
     let isAttending = false;
@@ -123,7 +143,8 @@ export const useClassSessionChecker = () => {
 
     // Check each active session to see if student is within attendance radius
     for (const session of activeSessions) {
-      if (cancellationRef.current.cancelled) {
+      // Check for cancellation or abort
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
         console.log(
           "[checkAttendanceByLocation] Cancelled during session loop."
         );
@@ -134,7 +155,8 @@ export const useClassSessionChecker = () => {
         // Log class name for debugging
         const classDetails = await getClassDetails(session.classId);
 
-        if (cancellationRef.current.cancelled) {
+        // Check again after async call
+        if (cancellationRef.current.cancelled || abortSignal.aborted) {
           console.log(
             "[checkAttendanceByLocation] Cancelled after fetching class details."
           );
@@ -261,11 +283,20 @@ export const useClassSessionChecker = () => {
       };
     }
 
+    // Cancel any existing check operations
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create a new abort controller for this operation
+    abortControllerRef.current = new AbortController();
+    const abortSignal = abortControllerRef.current.signal;
+
     setIsChecking(true);
 
     try {
       // Check for cancellation early
-      if (cancellationRef.current.cancelled) {
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
         console.log(
           "[useClassSessionChecker] Check cancelled before starting."
         );
@@ -296,8 +327,8 @@ export const useClassSessionChecker = () => {
         }
       }
 
-      // *** Check cancellation immediately after delay attempt ***
-      if (cancellationRef.current.cancelled) {
+      // Check for cancellation or abort after delay
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
         console.log(
           "[useClassSessionChecker] Check cancelled after initial delay."
         );
@@ -314,17 +345,45 @@ export const useClassSessionChecker = () => {
         user.uid
       );
 
+      // Check for cancellation
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
+        console.log(
+          "[useClassSessionChecker] Cancelled after fetching student classes"
+        );
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
+
       // Get all active sessions for the student's classes
       const activeSessions: ActiveSessionData[] =
         await getActiveSessionsForStudent(user.uid);
 
+      // Check for cancellation
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
+        console.log(
+          "[useClassSessionChecker] Cancelled after fetching active sessions"
+        );
+        return {
+          success: false,
+          message: "Check-in cancelled.",
+          isAttending: false,
+          cancelled: true,
+        };
+      }
+
       // Get class details for enrolled classes
       const enrolledClassDetailsPromises = studentClasses.map(async (cls) => {
-        if (cancellationRef.current.cancelled) return null;
+        if (cancellationRef.current.cancelled || abortSignal.aborted)
+          return null;
 
         const details = await getClassDetails(cls.classId);
 
-        if (cancellationRef.current.cancelled) return null;
+        if (cancellationRef.current.cancelled || abortSignal.aborted)
+          return null;
 
         return (
           details || {
@@ -336,12 +395,12 @@ export const useClassSessionChecker = () => {
       });
 
       let enrolledClassDetails: (ClassDetails | null)[] = [];
-      if (!cancellationRef.current.cancelled) {
+      if (!cancellationRef.current.cancelled && !abortSignal.aborted) {
         enrolledClassDetails = await Promise.all(enrolledClassDetailsPromises);
         // Filter out nulls potentially caused by cancellation during Promise.all
         enrolledClassDetails = enrolledClassDetails.filter((d) => d !== null);
         // Final check after all details are fetched
-        if (cancellationRef.current.cancelled) {
+        if (cancellationRef.current.cancelled || abortSignal.aborted) {
           console.log(
             "[useClassSessionChecker] Cancelled after fetching enrolled class details."
           );
@@ -356,11 +415,13 @@ export const useClassSessionChecker = () => {
 
       // Get class details for classes with active sessions
       const activeClassDetailsPromises = activeSessions.map(async (session) => {
-        if (cancellationRef.current.cancelled) return null;
+        if (cancellationRef.current.cancelled || abortSignal.aborted)
+          return null;
 
         const details = await getClassDetails(session.classId);
 
-        if (cancellationRef.current.cancelled) return null;
+        if (cancellationRef.current.cancelled || abortSignal.aborted)
+          return null;
 
         return (
           details || {
@@ -372,11 +433,11 @@ export const useClassSessionChecker = () => {
       });
 
       let activeClassDetails: (ClassDetails | null)[] = [];
-      if (!cancellationRef.current.cancelled) {
+      if (!cancellationRef.current.cancelled && !abortSignal.aborted) {
         activeClassDetails = await Promise.all(activeClassDetailsPromises);
         activeClassDetails = activeClassDetails.filter((d) => d !== null);
         // Final check after all details are fetched
-        if (cancellationRef.current.cancelled) {
+        if (cancellationRef.current.cancelled || abortSignal.aborted) {
           console.log(
             "[useClassSessionChecker] Cancelled after fetching active class details."
           );
@@ -422,14 +483,17 @@ export const useClassSessionChecker = () => {
       const attendanceStatus = await checkAttendanceByLocation(
         studentCoords,
         activeSessions,
-        cancellationRef
+        cancellationRef,
+        abortSignal
       );
 
       // Check if checkAttendanceByLocation itself was cancelled
-      if (attendanceStatus.cancelled) {
-        console.log(
-          "[useClassSessionChecker] Location check was cancelled internally."
-        );
+      if (
+        attendanceStatus.cancelled ||
+        cancellationRef.current.cancelled ||
+        abortSignal.aborted
+      ) {
+        console.log("[useClassSessionChecker] Location check was cancelled.");
         return {
           success: false,
           message: "Check-in cancelled.",
@@ -458,11 +522,11 @@ export const useClassSessionChecker = () => {
         attendingClass
       );
 
-      // --- Add check-in logic ---
+      // Add check-in logic
       if (isAttending && sessionId && user?.uid) {
         try {
           // Final check before writing to DB
-          if (cancellationRef.current.cancelled) {
+          if (cancellationRef.current.cancelled || abortSignal.aborted) {
             console.log(
               "[useClassSessionChecker] Check cancelled just before writing check-in."
             );
@@ -498,7 +562,6 @@ export const useClassSessionChecker = () => {
           };
         }
       }
-      // --- End of added logic ---
 
       return {
         success: true,
@@ -509,7 +572,7 @@ export const useClassSessionChecker = () => {
     } catch (error) {
       console.error("Error checking sessions:", error);
       // Check if error occurred *after* cancellation
-      if (cancellationRef.current.cancelled) {
+      if (cancellationRef.current.cancelled || abortSignal.aborted) {
         return {
           success: false,
           message: "Check-in cancelled.",
@@ -523,13 +586,14 @@ export const useClassSessionChecker = () => {
         isAttending: false,
       };
     } finally {
+      // Clear the abort controller reference
+      abortControllerRef.current = null;
+
       // Only set isChecking to false if not cancelled, to prevent UI flicker if cancel happens fast
-      // Although, the cancel button should ideally disappear immediately anyway.
       if (!cancellationRef.current.cancelled) {
         setIsChecking(false);
       } else {
         // If cancelled, ensure the loading state is definitively turned off.
-        // It's possible setIsChecking(false) in the cancel handler runs slightly later.
         setIsChecking(false);
       }
     }
@@ -538,5 +602,6 @@ export const useClassSessionChecker = () => {
   return {
     isChecking,
     checkSessions,
+    cancelChecking,
   };
 };

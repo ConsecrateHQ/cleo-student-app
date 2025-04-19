@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,13 @@ import {
   ViewStyle,
   TextStyle,
 } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
+import Animated, {
+  FadeIn,
+  useSharedValue,
+  withTiming,
+  useAnimatedStyle,
+  Easing,
+} from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 
 interface CheckInButtonProps {
@@ -29,19 +35,152 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
   animatedNewTextStyle,
   animatedCircleStyle,
 }) => {
+  // Add local transition for better state handling
+  const activeOpacity = useSharedValue(0);
+  const statusTextOpacity = useSharedValue(1);
+  const statusTextTranslateY = useSharedValue(0);
+
+  // Track previous session state to detect transitions
+  const [prevIsActiveSession, setPrevIsActiveSession] =
+    useState(isActiveSession);
+  const [prevIsCheckingIn, setPrevIsCheckingIn] = useState(isCheckingIn);
+
+  // Add a compound state variable for better state tracking
+  const [stateKey, setStateKey] = useState(
+    `${isActiveSession}-${isCheckingIn}`
+  );
+
+  // Debug output to track state changes
+  console.log(
+    `CheckInButton render - isActiveSession: ${isActiveSession}, prevIsActiveSession: ${prevIsActiveSession}, isCheckingIn: ${isCheckingIn}, prevIsCheckingIn: ${prevIsCheckingIn}`
+  );
+
+  // Handle all state transitions in one place for better coordination
+  const handleStateTransition = useCallback(() => {
+    const newStateKey = `${isActiveSession}-${isCheckingIn}`;
+    if (stateKey === newStateKey) return; // No change
+
+    console.log(
+      `CheckInButton state transition: ${stateKey} -> ${newStateKey}`
+    );
+    setStateKey(newStateKey);
+
+    // State transitions that require animation
+    if (!prevIsActiveSession && isActiveSession) {
+      // Transition to active session
+      console.log("Transitioning to active session state");
+
+      // Hide the idle text when transitioning to active session
+      statusTextOpacity.value = withTiming(0, {
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+      });
+
+      // Animate check icon
+      activeOpacity.value = withTiming(1, {
+        duration: 300,
+        easing: Easing.inOut(Easing.ease),
+      });
+    } else if (prevIsActiveSession && !isActiveSession) {
+      // Transition from active to idle
+      console.log("Transitioning from active to idle state");
+
+      // Animate check icon out
+      activeOpacity.value = withTiming(0, {
+        duration: 300,
+        easing: Easing.inOut(Easing.ease),
+      });
+
+      // Show the idle text again when session ends
+      statusTextOpacity.value = withTiming(1, {
+        duration: 400,
+        easing: Easing.inOut(Easing.ease),
+      });
+      statusTextTranslateY.value = withTiming(0, {
+        duration: 400,
+        easing: Easing.inOut(Easing.ease),
+      });
+    } else if (
+      (!prevIsCheckingIn && isCheckingIn) ||
+      (prevIsCheckingIn && !isCheckingIn)
+    ) {
+      // Either starting or ending the checking state
+      // Let the firefly animation handle the text transitions
+      console.log(
+        isCheckingIn
+          ? "Starting check-in animation"
+          : "Ending check-in animation"
+      );
+
+      // If ending check-in and not in active session, ensure idle text is visible
+      if (!isCheckingIn && !isActiveSession) {
+        statusTextOpacity.value = withTiming(1, {
+          duration: 300,
+          easing: Easing.inOut(Easing.ease),
+        });
+      }
+    }
+
+    // Update previous state trackers
+    setPrevIsActiveSession(isActiveSession);
+    setPrevIsCheckingIn(isCheckingIn);
+  }, [
+    isActiveSession,
+    isCheckingIn,
+    prevIsActiveSession,
+    prevIsCheckingIn,
+    stateKey,
+    activeOpacity,
+    statusTextOpacity,
+    statusTextTranslateY,
+  ]);
+
+  // Run state transition handler on all state changes
+  useEffect(() => {
+    handleStateTransition();
+  }, [isActiveSession, isCheckingIn, handleStateTransition]);
+
+  // Create animated styles
+  const animatedCheckStyle = useAnimatedStyle(() => ({
+    opacity: activeOpacity.value,
+  }));
+
+  const animatedStatusTextStyle = useAnimatedStyle(() => ({
+    opacity: statusTextOpacity.value,
+    transform: [{ translateY: statusTextTranslateY.value }],
+  }));
+
+  // Determine which text should be visible based on current state
+  const idleTextVisible = !isActiveSession && !isCheckingIn;
+  const checkingTextVisible = isCheckingIn;
+
   return (
     <View style={styles.centerCircleContainer} pointerEvents="box-none">
       <View style={styles.textContainer}>
+        {/* Idle state text - ALWAYS render but control visibility with opacity */}
         <Animated.Text
           style={[
             styles.checkInText,
+            animatedStatusTextStyle,
             animatedTextStyle,
-            isActiveSession ? { opacity: 0 } : {},
+            { opacity: idleTextVisible ? 1 : 0 },
+            // Use pointerEvents to prevent interaction when invisible
+            !idleTextVisible && { position: "absolute" },
           ]}
         >
           Tap to Check In
         </Animated.Text>
-        <Animated.Text style={[styles.checkInText, animatedNewTextStyle]}>
+
+        {/* Loading text - ALWAYS render but control visibility with opacity */}
+        <Animated.Text
+          style={[
+            styles.checkInText,
+            animatedNewTextStyle,
+            { opacity: checkingTextVisible ? 1 : 0 },
+            // Use pointerEvents to prevent interaction when invisible
+            !checkingTextVisible && { position: "absolute" },
+          ]}
+        >
           Getting you in...
         </Animated.Text>
       </View>
@@ -55,14 +194,11 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
           onPress={onPress}
           disabled={isCheckingIn || isActiveSession}
         >
-          {isActiveSession && (
-            <Animated.View
-              entering={FadeIn.duration(300)}
-              style={styles.checkInActiveIndicator}
-            >
-              <Ionicons name="checkmark" size={36} color="#4CAF50" />
-            </Animated.View>
-          )}
+          <Animated.View
+            style={[styles.checkInActiveIndicator, animatedCheckStyle]}
+          >
+            <Ionicons name="checkmark" size={36} color="#4CAF50" />
+          </Animated.View>
         </TouchableOpacity>
       </Animated.View>
     </View>

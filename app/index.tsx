@@ -49,6 +49,7 @@ const App = () => {
     checkCancellationRef,
     handleCheckInPress,
     handleCancelPress,
+    resetCancellationState,
   } = useCheckIn();
 
   const {
@@ -62,49 +63,110 @@ const App = () => {
     snapPoints: [140, windowHeight],
   });
 
+  // Effect to reset cancellation state when leaving a session
+  useEffect(() => {
+    // Only reset cancellation state when explicitly leaving a session
+    // (not during cancellation or check-in process)
+    if (
+      !activeSession.isActive &&
+      !isAnimating &&
+      !isChecking &&
+      !isReturningHome
+    ) {
+      console.log(
+        "Session inactive and not checking in - resetting cancellation state"
+      );
+      resetCancellationState();
+      processedCheckRef.current = null;
+    }
+  }, [
+    activeSession.isActive,
+    resetCancellationState,
+    isAnimating,
+    isChecking,
+    isReturningHome,
+  ]);
+
   // Effect to handle pending check result display
   useEffect(() => {
-    if (pendingCheckResult && !isAnimating && !isReturningHome) {
-      // Skip if already processed this specific result
-      const resultId = `${pendingCheckResult.sessionId || ""}-${
-        pendingCheckResult.success
-      }-${pendingCheckResult.isAttending}`;
-      if (processedCheckRef.current === resultId) {
-        return;
+    if (
+      !pendingCheckResult ||
+      isCheckInCancelled ||
+      checkCancellationRef.current.cancelled
+    ) {
+      // Skip if no result or cancelled
+      return;
+    }
+
+    // Unique ID for this result to prevent duplicate processing
+    const resultId = `${pendingCheckResult.sessionId || ""}-${
+      pendingCheckResult.success
+    }-${pendingCheckResult.isAttending}`;
+
+    console.log("Processing check result:", pendingCheckResult);
+    console.log("Result ID:", resultId);
+    console.log("Previous processed ID:", processedCheckRef.current);
+    console.log(
+      "Cancellation state:",
+      isCheckInCancelled,
+      checkCancellationRef.current.cancelled
+    );
+
+    // Skip if already processed this result
+    if (processedCheckRef.current === resultId) {
+      console.log("Already processed this result, skipping");
+      return;
+    }
+
+    // Mark as processed immediately to prevent duplicate processing
+    processedCheckRef.current = resultId;
+
+    // Handle successful check-in
+    if (pendingCheckResult.success && pendingCheckResult.isAttending) {
+      console.log("Processing successful check-in result:", pendingCheckResult);
+
+      const sessionIdMatch = pendingCheckResult.sessionId || "";
+
+      // Extract the class name
+      let className = "Class";
+      if (pendingCheckResult.message.includes("Student is attending")) {
+        className = pendingCheckResult.message
+          .replace("Student is attending ", "")
+          .replace(".", "");
       }
 
-      // Add check for cancellation state to ensure cancelled check-ins are never processed
-      if (isCheckInCancelled || checkCancellationRef.current.cancelled) {
-        console.log("Ignoring pending check result due to user cancellation");
-        return;
-      }
+      console.log("Extracted class name:", className);
+      console.log("Session ID:", sessionIdMatch);
 
-      if (pendingCheckResult.success && pendingCheckResult.isAttending) {
-        const sessionIdMatch = pendingCheckResult.sessionId || "";
-        const classNameMatch = pendingCheckResult.message.match(
-          /Student is attending (.*)\./
+      // Extra validation to ensure we have valid data
+      if (!className || !sessionIdMatch) {
+        console.error(
+          "Invalid className or sessionId, cannot activate session"
         );
-        const className = classNameMatch ? classNameMatch[1] : "Class";
+        Alert.alert("Error", "Could not determine class details");
+        return;
+      }
 
-        // Mark as processed before handling to prevent loops
-        processedCheckRef.current = resultId;
+      // Collapse bottom sheet
+      if (bottomSheetRef.current) {
+        console.log("Collapsing bottom sheet");
+        bottomSheetRef.current.collapse();
+      }
 
-        // Now show the active session UI
+      // Show active session UI
+      try {
+        console.log("Showing active session elements...");
         showActiveSessionElements(className, sessionIdMatch);
-      } else {
-        // Mark as processed
-        processedCheckRef.current = resultId;
-
-        Alert.alert(
-          pendingCheckResult.success ? "Class Check Results" : "Error",
-          pendingCheckResult.message
-        );
+        console.log("Active session state updated successfully");
+      } catch (error) {
+        console.error("Error updating active session state:", error);
+        Alert.alert("Error", "Something went wrong processing your check-in.");
       }
+    } else if (pendingCheckResult.success === false) {
+      Alert.alert("Error", pendingCheckResult.message);
     }
   }, [
     pendingCheckResult,
-    isAnimating,
-    isReturningHome,
     isCheckInCancelled,
     checkCancellationRef,
     showActiveSessionElements,

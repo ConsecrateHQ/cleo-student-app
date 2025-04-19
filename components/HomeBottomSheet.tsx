@@ -28,18 +28,36 @@ const HomeBottomSheet: React.FC<HomeBottomSheetProps> = ({
 }) => {
   const windowHeight = Dimensions.get("window").height;
   const snapPoints = useMemo(() => [140, windowHeight], [windowHeight]);
+  const lastSearchStateRef = useRef(isSearching);
 
   // Effect to handle visibility during search
   useEffect(() => {
+    // Detect state transitions
+    const wasSearching = lastSearchStateRef.current;
+    const isNowSearching = isSearching;
+
+    console.log(
+      `HomeBottomSheet: wasSearching=${wasSearching}, isNowSearching=${isNowSearching}`
+    );
+
     // Use a small timeout to avoid immediate transitions
     const timer = setTimeout(() => {
-      if (isSearching) {
+      if (isNowSearching) {
         // Hide the sheet during search
+        console.log("HomeBottomSheet: Hiding sheet during search");
         bottomSheetRef.current?.close();
+      } else if (wasSearching && !isNowSearching) {
+        // Transitioning from searching to not searching (check-in complete or cancelled)
+        console.log("HomeBottomSheet: Search ended, showing sheet");
+        bottomSheetRef.current?.snapToIndex(0);
       } else {
+        // Default state - show the sheet
         bottomSheetRef.current?.snapToIndex(0);
       }
-    }, 50);
+    }, 100); // Slightly longer timeout for smoother transitions
+
+    // Update the reference for next check
+    lastSearchStateRef.current = isSearching;
 
     return () => clearTimeout(timer);
   }, [isSearching, bottomSheetRef]);
