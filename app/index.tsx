@@ -26,6 +26,7 @@ const App = () => {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const [devMenuVisible, setDevMenuVisible] = useState(false);
+  const processedCheckRef = useRef<string | null>(null);
 
   // Custom hooks
   const {
@@ -64,6 +65,14 @@ const App = () => {
   // Effect to handle pending check result display
   useEffect(() => {
     if (pendingCheckResult && !isAnimating && !isReturningHome) {
+      // Skip if already processed this specific result
+      const resultId = `${pendingCheckResult.sessionId || ""}-${
+        pendingCheckResult.success
+      }-${pendingCheckResult.isAttending}`;
+      if (processedCheckRef.current === resultId) {
+        return;
+      }
+
       // Add check for cancellation state to ensure cancelled check-ins are never processed
       if (isCheckInCancelled || checkCancellationRef.current.cancelled) {
         console.log("Ignoring pending check result due to user cancellation");
@@ -76,8 +85,16 @@ const App = () => {
           /Student is attending (.*)\./
         );
         const className = classNameMatch ? classNameMatch[1] : "Class";
+
+        // Mark as processed before handling to prevent loops
+        processedCheckRef.current = resultId;
+
+        // Now show the active session UI
         showActiveSessionElements(className, sessionIdMatch);
       } else {
+        // Mark as processed
+        processedCheckRef.current = resultId;
+
         Alert.alert(
           pendingCheckResult.success ? "Class Check Results" : "Error",
           pendingCheckResult.message

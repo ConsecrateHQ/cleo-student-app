@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 24,
+    marginBottom: 40,
     position: "relative",
   },
   checkInText: {
@@ -93,9 +93,9 @@ const styles = StyleSheet.create({
     position: "absolute",
   },
   checkInCircle: {
-    width: Dimensions.get("window").width * 0.32, // 32% of screen width
-    height: Dimensions.get("window").width * 0.32,
-    borderRadius: Dimensions.get("window").width * 0.16,
+    width: Dimensions.get("window").width * 0.3,
+    height: Dimensions.get("window").width * 0.3,
+    borderRadius: Dimensions.get("window").width * 0.15,
     backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",

@@ -75,14 +75,17 @@ export const useActiveSession = (): UseActiveSessionResult => {
 
   // Timer update effect
   useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+
     if (activeSession.isActive && !activeSession.timerInterval) {
-      const interval = setInterval(() => {
+      interval = setInterval(() => {
         setActiveSession((prev) => ({
           ...prev,
           timer: prev.timer + 1,
         }));
       }, 60000);
 
+      // Update state with the interval in a single call
       setActiveSession((prev) => ({
         ...prev,
         timerInterval: interval,
@@ -90,11 +93,13 @@ export const useActiveSession = (): UseActiveSessionResult => {
     }
 
     return () => {
-      if (activeSession.timerInterval) {
+      if (interval) {
+        clearInterval(interval);
+      } else if (activeSession.timerInterval) {
         clearInterval(activeSession.timerInterval);
       }
     };
-  }, [activeSession.isActive]);
+  }, [activeSession.isActive, activeSession.timerInterval]);
 
   // Show active session elements
   const showActiveSessionElements = (className: string, sessionId: string) => {
