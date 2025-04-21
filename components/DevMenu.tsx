@@ -15,24 +15,59 @@ import { Ionicons } from "@expo/vector-icons";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
 import LocationPermissionButton from "./LocationPermissionButton";
+
+// Web SDK imports
 import {
-  FirebaseFirestoreTypes,
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  setDoc,
-  addDoc,
-  query,
-  where,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  Timestamp,
-  GeoPoint,
-  limit,
-} from "@react-native-firebase/firestore";
-import { app } from "../utils/firebaseConfig";
+  collection as webCollection,
+  doc as webDoc,
+  getDoc as webGetDoc,
+  setDoc as webSetDoc,
+  addDoc as webAddDoc,
+  query as webQuery,
+  where as webWhere,
+  getDocs as webGetDocs,
+  updateDoc as webUpdateDoc,
+  deleteDoc as webDeleteDoc,
+  Timestamp as webTimestamp,
+  GeoPoint as webGeoPoint,
+  limit as webLimit,
+  serverTimestamp as webServerTimestamp,
+} from "firebase/firestore";
+
+// Import initializeFirestore for the temporary cloud instance
+import { initializeFirestore as initializeWebFirestore } from "firebase/firestore";
+
+// React Native Firebase imports
+// import {
+//   FirebaseFirestoreTypes,
+//   getFirestore,
+//   collection,
+//   doc,
+//   getDoc,
+//   setDoc,
+//   addDoc,
+//   query,
+//   where,
+//   getDocs,
+//   updateDoc,
+//   deleteDoc,
+//   Timestamp,
+//   GeoPoint,
+//   limit,
+// } from "@react-native-firebase/firestore";
+import {
+  webApp,
+  webDb, // Potentially emulator-connected
+  // rnApp, // Remove RN App
+  // rnDb, // Remove RN DB
+  // Remove cloudWebDb, cloudRnDb imports as they are no longer exported
+  // useWebSDK, // Remove useWebSDK
+  useEmulator,
+  firebaseConfig, // Import firebaseConfig to initialize temporary instance
+} from "../utils/firebaseConfig"; // Import new cloud instances
+
+// Web SDK imports for Firebase core functionality needed for temp instance
+import { initializeApp, getApp, getApps, deleteApp } from "firebase/app";
 
 interface DevMenuProps {
   visible: boolean;
@@ -55,8 +90,9 @@ interface ClassInfo {
   userIsEnrolled: boolean;
 }
 
-// Get the configured Firestore instance
-const db = getFirestore(app);
+// Get the configured Firestore instance - ALWAYS use webDb
+// const db = useWebSDK ? webDb : rnDb;
+const db = webDb;
 
 export default function DevMenu({ visible, onClose }: DevMenuProps) {
   const user = useAuthStore((state) => state.user);
@@ -91,34 +127,59 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
     },
   });
 
+  // Add a function to test the currently configured connection (emulator or cloud)
   const handleTestConnection = async () => {
+    setIsLoading((prev) => ({ ...prev, testConnection: true }));
+    const target = useEmulator ? "Emulator" : "Cloud";
+    const testCollectionName = `dev_menu_connection_test_${target.toLowerCase()}`;
+    const testDocId = `test_${Platform.OS}_${Date.now()}`;
+
+    const testData = {
+      timestamp: webServerTimestamp(),
+      message: `Connection test from DevMenu (${target})`,
+      userId: user?.uid || "unknown",
+      platform: Platform.OS,
+      timestampClient: new Date().toISOString(),
+    };
+
     try {
-      setIsLoading((prev) => ({ ...prev, testConnection: true }));
-      console.log("Testing connection to Firestore...");
+      console.log(
+        `[DevMenu] Attempting to write test document to ${target} Firestore collection '${testCollectionName}' using configured 'webDb'...`
+      );
 
-      const testRef = collection(db, "test_connection");
-      const timestamp = new Date().toISOString();
+      // Use the configured webDb instance
+      const testCollectionRef = webCollection(webDb, testCollectionName);
+      const testDocRef = webDoc(testCollectionRef, testDocId);
 
-      console.log("Attempting addDoc..."); // Add log before
-      const docRef = await addDoc(testRef, {
-        timestamp,
-        message: "Connection test successful",
-      });
-      console.log(`addDoc successful, docRef ID: ${docRef.id}`); // Add log after
+      // Write
+      await webSetDoc(testDocRef, testData);
+      console.log(`[DevMenu] ✅ Wrote test doc to ${target}`);
 
-      // await getDoc(docRef); // Temporarily comment out getDoc
+      // Read
+      const snap = await webGetDoc(testDocRef);
+      if (!snap.exists()) {
+        throw new Error(`Test doc ${testDocId} not found after write`);
+      }
+      console.log(`[DevMenu] ✅ Read test doc from ${target}`);
+
+      // Delete
+      await webDeleteDoc(testDocRef);
+      console.log(`[DevMenu] ✅ Deleted test doc from ${target}`);
 
       Alert.alert(
-        "Firestore Connection",
-        `Successfully performed WRITE on Firestore (doc ID: ${docRef.id}).`
+        `${target} Connection Success`,
+        `Successfully performed write/read/delete test on the configured ${target} Firestore instance!
+Collection: ${testCollectionName}`
       );
-      console.log("Firestore connection test successful (write only)");
-    } catch (error: any) {
-      console.error("Error testing Firestore connection:", error);
+    } catch (err) {
+      console.error(
+        `[DevMenu] Error testing connection to ${target} Firestore:`,
+        err
+      );
       Alert.alert(
         "Connection Error",
-        `Failed to connect/write to Firestore: ${
-          error?.message || String(error)
+        `Failed to connect/interact with ${target} Firestore: ${
+          err instanceof Error ? err.message : String(err)
         }`
       );
     } finally {
@@ -127,11 +188,12 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
   };
 
   const handleSeedEmulator = async () => {
+    const target = useEmulator ? "emulator" : "CLOUD database";
     try {
       setIsLoading((prev) => ({ ...prev, seed: true }));
-      console.log("Starting seed operation...");
-      await seedEmulator();
-      console.log("Seed operation completed successfully");
+      console.log(`Starting seed operation for ${target}...`);
+      await seedEmulator(); // seedEmulator should use the configured db internally
+      console.log(`Seed operation for ${target} completed successfully`);
 
       // Refresh class data after seeding
       await fetchClassData();
@@ -141,7 +203,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       console.error("Error in handleSeedEmulator:", error);
       Alert.alert(
         "Seeding Error",
-        `Error seeding emulator: ${error?.message || String(error)}`
+        `Error seeding ${target}: ${error?.message || String(error)}`
       );
     } finally {
       setIsLoading((prev) => ({ ...prev, seed: false }));
@@ -149,36 +211,64 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
   };
 
   const handleClearEmulator = async () => {
-    try {
-      setIsLoading((prev) => ({ ...prev, clear: true }));
-      console.log("Starting clear operation...");
-      await clearEmulatorData();
-      console.log("Clear operation completed successfully");
-
-      // Reset class data
-      setClasses({
-        CS101: {
-          id: null,
-          name: "Computer Science 101",
-          sessionId: null,
-          userIsEnrolled: false,
-        },
-        GermanA2: {
-          id: null,
-          name: "German A2",
-          sessionId: null,
-          userIsEnrolled: false,
-        },
-      });
-    } catch (error: any) {
-      console.error("Error in handleClearEmulator:", error);
+    const target = useEmulator ? "emulator" : "CLOUD database";
+    if (!useEmulator) {
       Alert.alert(
-        "Clearing Error",
-        `Error clearing emulator data: ${error?.message || String(error)}`
+        "Safety Check",
+        "Clearing cloud data is disabled from the Dev Menu for safety. Please use the Firebase console."
       );
-    } finally {
-      setIsLoading((prev) => ({ ...prev, clear: false }));
+      return;
     }
+
+    // Confirm before clearing emulator
+    Alert.alert(
+      "Clear Emulator Data",
+      "Are you sure you want to delete ALL data in the Firestore emulator? This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear Emulator",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsLoading((prev) => ({ ...prev, clear: true }));
+              console.log(`Starting clear operation for ${target}...`);
+              await clearEmulatorData(); // clearEmulatorData should use the configured db
+              console.log(
+                `Clear operation for ${target} completed successfully`
+              );
+
+              // Reset class data
+              setClasses({
+                CS101: {
+                  id: null,
+                  name: "Computer Science 101",
+                  sessionId: null,
+                  userIsEnrolled: false,
+                },
+                GermanA2: {
+                  id: null,
+                  name: "German A2",
+                  sessionId: null,
+                  userIsEnrolled: false,
+                },
+              });
+              Alert.alert("Success", `Emulator data cleared!`);
+            } catch (error: any) {
+              console.error(`Error in handleClearEmulator (${target}):`, error);
+              Alert.alert(
+                "Clearing Error",
+                `Error clearing ${target} data: ${
+                  error?.message || String(error)
+                }`
+              );
+            } finally {
+              setIsLoading((prev) => ({ ...prev, clear: false }));
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Helper function to fetch class info and enrollment status
@@ -191,14 +281,15 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         const className =
           key === "CS101" ? "Computer Science 101" : "German A2";
 
+        // ALWAYS use Web SDK implementation
         // Find class
-        const classesRef = collection(db, "classes");
-        const classQuery = query(
+        const classesRef = webCollection(webDb, "classes");
+        const classQuery = webQuery(
           classesRef,
-          where("name", "==", className),
-          limit(1)
+          webWhere("name", "==", className),
+          webLimit(1)
         );
-        const classSnap = await getDocs(classQuery);
+        const classSnap = await webGetDocs(classQuery);
 
         let classId = null;
         let sessionId = null;
@@ -208,19 +299,25 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
           classId = classSnap.docs[0].id;
 
           // Check if user is enrolled in this class
-          const studentRef = doc(db, "classes", classId, "students", user.uid);
-          const studentSnap = await getDoc(studentRef);
-          userIsEnrolled = studentSnap.exists;
+          const studentRef = webDoc(
+            webDb,
+            "classes",
+            classId,
+            "students",
+            user.uid
+          );
+          const studentSnap = await webGetDoc(studentRef);
+          userIsEnrolled = studentSnap.exists();
 
           // Check for active sessions
-          const sessionsRef = collection(db, "sessions");
-          const sessionQuery = query(
+          const sessionsRef = webCollection(webDb, "sessions");
+          const sessionQuery = webQuery(
             sessionsRef,
-            where("classId", "==", classId),
-            where("status", "==", "active"),
-            limit(1)
+            webWhere("classId", "==", classId),
+            webWhere("status", "==", "active"),
+            webLimit(1)
           );
-          const sessionSnap = await getDocs(sessionQuery);
+          const sessionSnap = await webGetDocs(sessionQuery);
 
           if (!sessionSnap.empty) {
             sessionId = sessionSnap.docs[0].id;
@@ -238,7 +335,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         }));
       }
     } catch (error) {
-      console.error("Error fetching class data:", error);
+      console.error(`Error fetching class data (Web SDK):`, error);
     }
   };
 
@@ -259,73 +356,73 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         return;
       }
 
-      // If user is already enrolled, remove them
+      // ALWAYS Use Web SDK implementation
       if (classInfo.userIsEnrolled) {
         // Remove from class's students subcollection
-        const studentRef = doc(
-          db,
+        const studentRef = webDoc(
+          webDb,
           "classes",
           classInfo.id,
           "students",
           user.uid
         );
-        await deleteDoc(studentRef);
+        await webDeleteDoc(studentRef);
 
         // Remove from user's classes
-        const userClassRef = doc(
-          db,
+        const userClassRef = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           classInfo.id
         );
-        await deleteDoc(userClassRef);
+        await webDeleteDoc(userClassRef);
 
         Alert.alert("Success", `User removed from ${classInfo.name}!`);
       } else {
         // 1. Ensure user exists in 'users' collection
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists) {
-          await setDoc(userRef, {
+        const userRef = webDoc(webDb, "users", user.uid);
+        const userSnap = await webGetDoc(userRef);
+        if (!userSnap.exists()) {
+          await webSetDoc(userRef, {
             uid: user.uid,
             email: user.email || "",
             displayName: user.displayName || "Unnamed User",
             role: "student",
-            created_at: Timestamp.now(),
+            created_at: webServerTimestamp(),
           });
-          console.log(`Created user document for ${user.uid}`);
+          console.log(`Created user document for ${user.uid} (Web SDK)`);
         }
 
         // Find teacher name
-        const classDocRef = doc(db, "classes", classInfo.id);
-        const classDoc = await getDoc(classDocRef);
+        const classDocRef = webDoc(webDb, "classes", classInfo.id);
+        const classDoc = await webGetDoc(classDocRef);
         const classData = classDoc.data() || {};
         const teacherName =
           classKey === "CS101" ? "Professor Smith" : "Frau Tuyen";
 
         // Add user to class's students subcollection
-        const studentRef = doc(
-          db,
+        const studentRef = webDoc(
+          webDb,
           "classes",
           classInfo.id,
           "students",
           user.uid
         );
-        await setDoc(studentRef, { joinDate: Timestamp.now() });
+        await webSetDoc(studentRef, { joinDate: webServerTimestamp() });
 
         // Add class to user's classes
-        const userClassRef = doc(
-          db,
+        const userClassRef = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           classInfo.id
         );
-        await setDoc(userClassRef, {
+        await webSetDoc(userClassRef, {
           className: classInfo.name,
           teacherName: teacherName,
-          joinDate: Timestamp.now(),
+          joinDate: webServerTimestamp(),
         });
 
         Alert.alert("Success", `User added to ${classInfo.name}!`);
@@ -334,7 +431,7 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       // Update the enrollment status
       await fetchClassData();
     } catch (error: any) {
-      console.error(`Error toggling user in ${classKey}:`, error);
+      console.error(`Error toggling user in ${classKey} (Web SDK):`, error);
       Alert.alert(
         "Error",
         `Failed to modify enrollment: ${error?.message || String(error)}`
@@ -364,10 +461,12 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
       console.log(
         `Deactivating session: ${classInfo.sessionId} for ${classInfo.name}...`
       );
-      const sessionRef = doc(db, "sessions", classInfo.sessionId);
-      await updateDoc(sessionRef, {
+
+      // ALWAYS Use Web SDK implementation
+      const sessionRefWeb = webDoc(webDb, "sessions", classInfo.sessionId);
+      await webUpdateDoc(sessionRefWeb, {
         status: "ended",
-        endTime: Timestamp.now(),
+        endTime: webServerTimestamp(),
       });
 
       // Update class info
@@ -377,7 +476,10 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         `Session for ${classInfo.name} deactivated (ended)`
       );
     } catch (error: any) {
-      console.error(`Error deactivating session for ${classKey}:`, error);
+      console.error(
+        `Error deactivating session for ${classKey} (Web SDK):`,
+        error
+      );
       Alert.alert(
         "Deactivation Error",
         `Error deactivating session: ${error?.message || String(error)}`
@@ -420,34 +522,38 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
         `Starting new session for ${classInfo.name} (ID: ${classInfo.id})...`
       );
 
+      // ALWAYS Use Web SDK implementation
       // Use different locations for each class
       const location =
         classKey === "CS101"
-          ? new GeoPoint(34.0522, -118.2437) // Los Angeles
-          : new GeoPoint(52.52, 13.405); // Berlin
+          ? new webGeoPoint(34.0522, -118.2437) // Los Angeles
+          : new webGeoPoint(52.52, 13.405); // Berlin
 
       // Define new session data
       const newSessionData = {
         classId: classInfo.id,
         teacherId: user.uid,
-        startTime: Timestamp.now(),
+        startTime: webServerTimestamp(),
         endTime: null,
         status: "active",
         location,
         radius: 100, // meters
-        created_at: Timestamp.now(),
+        created_at: webServerTimestamp(),
       };
 
-      const sessionsCollectionRef = collection(db, "sessions");
-      const newSessionRef = await addDoc(sessionsCollectionRef, newSessionData);
+      const sessionsCollectionRef = webCollection(webDb, "sessions");
+      const newSessionRef = await webAddDoc(
+        sessionsCollectionRef,
+        newSessionData
+      );
 
-      console.log(`New session started with ID: ${newSessionRef.id}`);
+      console.log(`New session started with ID: ${newSessionRef.id} (Web SDK)`);
 
       // Update class info
       await fetchClassData();
       Alert.alert("Success", `New session started for ${classInfo.name}!`);
     } catch (error: any) {
-      console.error(`Error starting session for ${classKey}:`, error);
+      console.error(`Error starting session for ${classKey} (Web SDK):`, error);
       Alert.alert(
         "Starting Error",
         `Error starting new session: ${error?.message || String(error)}`
@@ -514,47 +620,43 @@ export default function DevMenu({ visible, onClose }: DevMenuProps) {
           </View>
 
           <ScrollView style={styles.scrollContent}>
-            <Text style={styles.sectionTitle}>Firebase Emulators</Text>
+            <Text style={styles.sectionTitle}>Firebase Connection</Text>
 
             <Text style={styles.emulatorInfo}>
-              Status: Using emulator ({app.name}). Check logs for host/port.
+              Status: Using Web SDK
+              {webApp ? ` (${webApp.name || "unnamed"})` : ""}
+              {"\n"}Target:
+              {useEmulator ? " 🔥 Local Emulator" : " ☁️ Firebase Cloud"}
             </Text>
 
             <ActionButton
               icon="flash-outline"
-              text="Test Connection to Firestore"
+              text={`Test Connection to ${useEmulator ? "Emulator" : "Cloud"}`}
               onPress={handleTestConnection}
               isLoading={isLoading.testConnection}
-              loadingText="Testing connection..."
+              loadingText={`Testing ${useEmulator ? "emulator" : "cloud"}...`}
             />
 
             <ActionButton
               icon="leaf-outline"
-              text="Seed Test Data"
+              text={`Seed ${
+                useEmulator ? "Emulator" : "Cloud (Disabled)"
+              } Data`}
               onPress={handleSeedEmulator}
               isLoading={isLoading.seed}
-              loadingText="Seeding data..."
+              loadingText={`Seeding ${useEmulator ? "emulator" : "cloud"}...`}
+              disabled={!useEmulator} // Disable seeding cloud from DevMenu for safety
             />
 
             <ActionButton
               icon="skull-outline"
-              text="Nuke Database"
-              onPress={() => {
-                Alert.alert(
-                  "Nuke Database",
-                  "Are you sure? This will permanently delete ALL data in the emulator database. This cannot be undone.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Nuke it!",
-                      style: "destructive",
-                      onPress: handleClearEmulator,
-                    },
-                  ]
-                );
-              }}
+              text={`Clear ${
+                useEmulator ? "Emulator" : "Cloud (Disabled)"
+              } Data`}
+              onPress={handleClearEmulator} // Confirmation is now inside handleClearEmulator
               isLoading={isLoading.clear}
-              loadingText="Nuking database..."
+              loadingText={`Clearing ${useEmulator ? "emulator" : "cloud"}...`}
+              disabled={!useEmulator} // Disable clearing cloud from DevMenu
             />
 
             <LocationPermissionButton />

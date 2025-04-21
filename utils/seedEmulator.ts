@@ -1,353 +1,349 @@
 import {
-  getFirestore,
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  Timestamp,
-  GeoPoint,
-  writeBatch,
-  getDocs,
-  query,
-  limit,
-  type FirebaseFirestoreTypes,
-} from "@react-native-firebase/firestore";
-// auth from "@react-native-firebase/auth"; // Removed unused import
+  getFirestore as getWebFirestore,
+  collection as webCollection,
+  doc as webDoc,
+  setDoc as webSetDoc,
+  deleteDoc as webDeleteDoc,
+  Timestamp as webTimestamp,
+  GeoPoint as webGeoPoint,
+  writeBatch as webWriteBatch,
+  getDocs as webGetDocs,
+  query as webQuery,
+  limit as webLimit,
+  serverTimestamp as webServerTimestamp,
+  type Firestore as WebFirestore,
+} from "firebase/firestore";
+
 import { Alert } from "react-native";
-import { app } from "./firebaseConfig"; // Import shared app instance
+import { webDb, useEmulator } from "./firebaseConfig";
 
-/**
- * Seeds the Firebase emulator with sample data for testing
- * Should only be called in development with emulators running
- */
-export const seedEmulator = async () => {
-  if (!__DEV__) {
-    console.error("Seed function should only be called in development!");
-    return;
+// --- Seeding Helper Functions --- (Now exclusively Web SDK)
+const createUsers = async (db: WebFirestore, nowTimestamp: any) => {
+  console.log("    -> Creating users...");
+  const teacherUid = "teacher123";
+  const germanTeacherUid = "teacher456";
+  const studentIds = ["student1", "student2", "student3"];
+  const teacherRef = webDoc(db, "users", teacherUid);
+  await webSetDoc(teacherRef, {
+    uid: teacherUid,
+    email: "teacher@example.com",
+    displayName: "Professor Smith",
+    role: "teacher",
+    created_at: nowTimestamp,
+  });
+  const germanTeacherRef = webDoc(db, "users", germanTeacherUid);
+  await webSetDoc(germanTeacherRef, {
+    uid: germanTeacherUid,
+    email: "frau.tuyen@example.com",
+    displayName: "Frau Tuyen",
+    role: "teacher",
+    created_at: nowTimestamp,
+  });
+  for (let i = 0; i < studentIds.length; i++) {
+    const studentId = studentIds[i];
+    const studentRef = webDoc(db, "users", studentId);
+    await webSetDoc(studentRef, {
+      uid: studentId,
+      email: `student${i + 1}@example.com`,
+      displayName: `Student ${i + 1}`,
+      role: "student",
+      created_at: nowTimestamp,
+    });
   }
+  console.log("    - ✅ Users created.");
+  return { teacherUid, germanTeacherUid, studentIds };
+};
 
-  console.log("🌱 [Seed] Starting Firebase emulator seeding process...");
+const createClasses = async (
+  db: WebFirestore,
+  teacherUid: string,
+  germanTeacherUid: string,
+  nowTimestamp: any
+) => {
+  console.log("    -> Creating classes...");
+  const classesColRef = webCollection(db, "classes");
+  const classRef = webDoc(classesColRef);
+  const classId = classRef.id;
+  await webSetDoc(classRef, {
+    classId,
+    name: "Computer Science 101",
+    teacherId: teacherUid,
+    joinCode: "CS101",
+    created_at: nowTimestamp,
+  });
+  const germanClassRef = webDoc(classesColRef);
+  const germanClassId = germanClassRef.id;
+  await webSetDoc(germanClassRef, {
+    classId: germanClassId,
+    name: "German A2",
+    teacherId: germanTeacherUid,
+    joinCode: "GER102",
+    created_at: nowTimestamp,
+  });
+  console.log("    - ✅ Classes created.");
+  return { classId, germanClassId };
+};
 
-  try {
-    // Check if emulator connection is working
-    console.log("  -> [Seed] Verifying emulator connection...");
-    try {
-      console.log("     - [Seed Conn Test] Getting Firestore instance...");
-      const db = getFirestore(app); // Use imported app
-      console.log("     - [Seed Conn Test] Getting collection ref...");
-      const collectionRef = collection(db, "_test_connection"); // Use modular collection()
-      console.log("     - [Seed Conn Test] Getting document ref...");
-      const testDocRef = doc(collectionRef); // Use modular doc() for auto-ID
-      console.log(
-        `     - [Seed Conn Test] Test document ref created: ${testDocRef.path}`
-      ); // Log path
-
-      console.log(
-        `     - [Seed Conn Test] Attempting to set document ${testDocRef.path}...`
-      );
-      await setDoc(testDocRef, { timestamp: Timestamp.now() }); // Use modular setDoc() and Timestamp
-      console.log(
-        `     - [Seed Conn Test] ✅ Successfully set document ${testDocRef.path}.`
-      );
-
-      console.log(
-        `     - [Seed Conn Test] Attempting to delete document ${testDocRef.path}...`
-      );
-      await deleteDoc(testDocRef); // Use modular deleteDoc()
-      console.log(
-        `     - [Seed Conn Test] ✅ Successfully deleted document ${testDocRef.path}.`
-      );
-
-      console.log("    - ✅ Emulator connection verified successfully!");
-    } catch (connectionError) {
-      console.error(
-        "  ❌ [Seed] Emulator connection test failed:",
-        connectionError
-      );
-      const errorMessage =
-        connectionError instanceof Error
-          ? connectionError.message
-          : JSON.stringify(connectionError);
-      console.error(`   Connection Error details: ${errorMessage}`);
-      if (connectionError instanceof Error && connectionError.stack) {
-        console.error(`   Connection Stack trace: ${connectionError.stack}`);
-      }
-      Alert.alert(
-        "Emulator Connection Error",
-        `Connection test failed: ${errorMessage}. Check emulator status and config.`
-      );
-      throw new Error("Emulator connection failed"); // Re-throw
-    }
-
-    // Clear existing data first
-    console.log("  -> [Seed] Clearing existing data before seeding...");
-    await clearEmulatorData(); // Assumes clearEmulatorData has its own detailed logging
-    console.log("    - ✅ Existing data cleared.");
-
-    console.log("  -> [Seed] Creating test users...");
-    const db = getFirestore(app); // Use imported app
-    // Create teacher users
-    const teacherUid = "teacher123";
-    const teacherRef = doc(db, "users", teacherUid); // Use modular doc(db, collectionPath, docId)
-    await setDoc(teacherRef, {
-      // Use modular setDoc()
-      uid: teacherUid,
-      email: "teacher@example.com",
-      displayName: "Professor Smith",
-      role: "teacher",
-      created_at: Timestamp.now(), // Use modular Timestamp
-    });
-    console.log(`    - Created teacher user: ${teacherUid}`);
-
-    // Create second teacher
-    const germanTeacherUid = "teacher456";
-    const germanTeacherRef = doc(db, "users", germanTeacherUid);
-    await setDoc(germanTeacherRef, {
-      uid: germanTeacherUid,
-      email: "frau.tuyen@example.com",
-      displayName: "Frau Tuyen",
-      role: "teacher",
-      created_at: Timestamp.now(),
-    });
-    console.log(`    - Created teacher user: ${germanTeacherUid}`);
-
-    // Create student users
-    const studentIds = ["student1", "student2", "student3"];
-    for (let i = 0; i < studentIds.length; i++) {
-      const studentId = studentIds[i];
-      const studentRef = doc(db, "users", studentId); // Use modular doc()
-      await setDoc(studentRef, {
-        // Use modular setDoc()
-        uid: studentId,
-        email: `student${i + 1}@example.com`,
-        displayName: `Student ${i + 1}`,
-        role: "student",
-        created_at: Timestamp.now(), // Use modular Timestamp
-      });
-      console.log(`    - Created student user: ${studentId}`);
-    }
-    console.log("    - ✅ Test users created.");
-
-    console.log("  -> [Seed] Creating test class...");
-    // Create a class
-    const classesColRef = collection(db, "classes"); // Use modular collection()
-    const classRef = doc(classesColRef); // Use modular doc() for auto-ID
-    const classId = classRef.id;
-
-    await setDoc(classRef, {
-      // Use modular setDoc()
+const enrollStudents = async (
+  db: WebFirestore,
+  classId: string,
+  studentIds: string[],
+  nowTimestamp: any
+) => {
+  console.log("    -> Enrolling students...");
+  for (const studentId of studentIds) {
+    const studentEnrollmentRef = webDoc(
+      db,
+      "classes",
       classId,
-      name: "Computer Science 101",
-      teacherId: teacherUid,
-      joinCode: "CS101",
-      created_at: Timestamp.now(), // Use modular Timestamp
-    });
-    console.log(`    - ✅ Test class created with ID: ${classId}`);
-
-    // Create German A2 class
-    const germanClassRef = doc(classesColRef);
-    const germanClassId = germanClassRef.id;
-    await setDoc(germanClassRef, {
-      classId: germanClassId,
-      name: "German A2",
-      teacherId: germanTeacherUid,
-      joinCode: "GER102",
-      created_at: Timestamp.now(),
-    });
-    console.log(`    - ✅ German A2 class created with ID: ${germanClassId}`);
-
-    console.log(`  -> [Seed] Enrolling students in class ${classId}...`);
-    // Enroll students in the class
-    for (const studentId of studentIds) {
-      // Create student enrollment in class
-      // Use modular doc(db, pathSegments...)
-      const studentEnrollmentRef = doc(
-        db,
-        "classes",
-        classId,
-        "students",
-        studentId
-      );
-      await setDoc(studentEnrollmentRef, {
-        // Use modular setDoc()
-        joinDate: Timestamp.now(), // Use modular Timestamp
-      });
-      console.log(
-        `    - Enrolled student ${studentId} in class subcollection.`
-      );
-
-      // Add class to student's classes for quick lookup
-      const userClassRef = doc(
-        db,
-        "userClasses",
-        studentId,
-        "classes",
-        classId
-      ); // Use modular doc()
-      await setDoc(userClassRef, {
-        // Use modular setDoc()
-        className: "Computer Science 101",
-        teacherName: "Professor Smith",
-        joinDate: Timestamp.now(), // Use modular Timestamp
-      });
-      console.log(
-        `    - Added class ${classId} to userClasses for student ${studentId}.`
-      );
-    }
-    console.log("    - ✅ Students enrolled.");
-
-    console.log(`  -> [Seed] Creating test session for class ${classId}...`);
-    // Create a session for the class
-    const sessionsColRef = collection(db, "sessions"); // Use modular collection()
-    const sessionRef = doc(sessionsColRef); // Use modular doc() for auto-ID
-    await setDoc(sessionRef, {
-      // Use modular setDoc()
-      sessionId: sessionRef.id,
-      classId,
-      teacherId: teacherUid,
-      startTime: Timestamp.now(), // Use modular Timestamp
-      endTime: null,
-      status: "active",
-      location: new GeoPoint(37.7749, -122.4194), // Use modular GeoPoint
-      radius: 100, // meters
-      created_at: Timestamp.now(), // Use modular Timestamp
-    });
-    console.log(`    - ✅ Test session created with ID: ${sessionRef.id}`);
-
-    // Create a session for German A2 class
-    const germanSessionRef = doc(sessionsColRef);
-    await setDoc(germanSessionRef, {
-      sessionId: germanSessionRef.id,
-      classId: germanClassId,
-      teacherId: germanTeacherUid,
-      startTime: Timestamp.now(),
-      endTime: null,
-      status: "active",
-      location: new GeoPoint(52.52, 13.405), // Berlin coordinates
-      radius: 100, // meters
-      created_at: Timestamp.now(),
-    });
-    console.log(
-      `    - ✅ German A2 session created with ID: ${germanSessionRef.id}`
+      "students",
+      studentId
     );
-
-    console.log("✅ [Seed] Emulator seeded successfully!");
-    Alert.alert(
-      "Success",
-      "Firebase emulators seeded with sample data. Created 2 teachers, 3 students, 2 classes (CS101 and German A2), and 2 active sessions."
+    await webSetDoc(studentEnrollmentRef, { joinDate: nowTimestamp });
+    const userClassRef = webDoc(
+      db,
+      "userClasses",
+      studentId,
+      "classes",
+      classId
     );
-  } catch (error) {
-    console.error("❌ [Seed] Error during emulator seeding:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : JSON.stringify(error);
-    console.error(`   Error details: ${errorMessage}`);
-    if (error instanceof Error && error.stack) {
-      console.error(`   Stack trace: ${error.stack}`);
-    }
-    Alert.alert(
-      "Seeding Error",
-      `Failed to seed emulators: ${errorMessage}. See console for details.`
-    );
-    throw error; // Re-throw to be handled by the caller in DevMenu
+    await webSetDoc(userClassRef, {
+      className: "Computer Science 101",
+      teacherName: "Professor Smith",
+      joinDate: nowTimestamp,
+    });
   }
+  console.log("    - ✅ Students enrolled.");
+};
+
+const createSessions = async (
+  db: WebFirestore,
+  classId: string,
+  germanClassId: string,
+  teacherUid: string,
+  germanTeacherUid: string,
+  nowTimestamp: any
+) => {
+  console.log("    -> Creating sessions...");
+  const sessionsColRef = webCollection(db, "sessions");
+  const sessionRef = webDoc(sessionsColRef);
+  await webSetDoc(sessionRef, {
+    sessionId: sessionRef.id,
+    classId,
+    teacherId: teacherUid,
+    startTime: nowTimestamp,
+    endTime: null,
+    status: "active",
+    location: new webGeoPoint(37.7749, -122.4194),
+    radius: 100,
+    created_at: nowTimestamp,
+  });
+  const germanSessionRef = webDoc(sessionsColRef);
+  await webSetDoc(germanSessionRef, {
+    sessionId: germanSessionRef.id,
+    classId: germanClassId,
+    teacherId: germanTeacherUid,
+    startTime: nowTimestamp,
+    endTime: null,
+    status: "active",
+    location: new webGeoPoint(52.52, 13.405),
+    radius: 100,
+    created_at: nowTimestamp,
+  });
+  console.log("    - ✅ Sessions created.");
 };
 
 /**
- * Clears all data from the emulator for a fresh start
+ * Seeds the Firestore database (emulator or cloud) with sample data using the Web SDK.
  */
-export const clearEmulatorData = async () => {
-  console.log("🧹 [Clear] Starting to clear existing emulator data...");
-  const db = getFirestore(app); // Use imported app
+export const seedEmulator = async () => {
+  const target = useEmulator ? "emulator" : "CLOUD database";
+  console.log(
+    `🌱 [Seed] Starting Firebase seeding process using Web SDK for ${target}...`
+  );
 
+  // Use the imported webDb directly
+  const db = webDb;
+  const now = webServerTimestamp(); // Use server timestamp for consistency
+
+  // Connection Test (Simplified Web SDK Check)
   try {
-    const collectionsToClear = [
-      // Renamed variable for clarity
-      "users",
-      "classes",
-      "sessions",
-      "userClasses",
-      "_test_connection",
-    ];
-    let totalDocsDeleted = 0;
+    console.log(
+      `   -> [Seed] Verifying connection using Web SDK to ${target}...`
+    );
+    const testDocRef = webDoc(db, "_seed_connection_test", `web_${Date.now()}`);
+    await webSetDoc(testDocRef, { timestamp: now, sdk: "Web SDK", target });
+    await webDeleteDoc(testDocRef); // Clean up test doc
+    console.log(
+      `   ✅ [Seed] Connection test successful via Web SDK to ${target}.`
+    );
+  } catch (error: any) {
+    console.error(
+      `   ❌ [Seed] Connection test failed via Web SDK to ${target}:`,
+      error
+    );
+    Alert.alert(
+      "Seeding Error",
+      `Connection test failed for ${target}. Cannot seed database. Error: ${error.message}`
+    );
+    throw new Error(`Connection failed via Web SDK to ${target}`); // Halt seeding
+  }
 
-    // Delete all documents in each collection
-    for (const collectionName of collectionsToClear) {
-      console.log(`  -> [Clear] Clearing collection: ${collectionName}...`);
-      const collectionRef = collection(db, collectionName); // Use modular collection()
+  // Proceed with seeding using Web SDK helpers
+  try {
+    console.log(
+      `   -> [Seed] Clearing existing data before seeding ${target}...`
+    );
+    await clearData(db, ["users", "classes", "sessions", "userClasses"]); // Use the renamed clearData function
+    console.log(`   - ✅ [Seed] Existing data cleared from ${target}.`);
 
-      console.log(`    - [Clear] Fetching documents from ${collectionName}...`);
-      // Use pagination with modular query() and limit()
-      let querySnapshot: FirebaseFirestoreTypes.QuerySnapshot<FirebaseFirestoreTypes.DocumentData>;
-      let docsInCollection = 0;
-      let lastVisibleDoc = null; // Needed for pagination if implemented, but not strictly necessary for limit(100).get() loop
+    console.log(`   -> [Seed] Seeding data into ${target}...`);
+    const { teacherUid, germanTeacherUid, studentIds } = await createUsers(
+      db,
+      now
+    );
+    const { classId, germanClassId } = await createClasses(
+      db,
+      teacherUid,
+      germanTeacherUid,
+      now
+    );
+    await enrollStudents(db, classId, studentIds, now);
+    // Maybe enroll some students in German too?
+    await createSessions(
+      db,
+      classId,
+      germanClassId,
+      teacherUid,
+      germanTeacherUid,
+      now
+    );
 
-      // Loop using getDocs with limit
-      while (true) {
-        // Construct the query
-        const q = query(collectionRef, limit(100)); // Fetch in batches of 100
+    console.log(`✅ [Seed] Seeding completed successfully for ${target}!`);
+    Alert.alert("Success", `Database seeded successfully (${target})!`);
+  } catch (error: any) {
+    console.error(
+      `❌ [Seed] Error during seeding via Web SDK for ${target}:`,
+      error
+    );
+    Alert.alert(
+      "Seeding Error",
+      `An error occurred during seeding (${target}): ${error.message}`
+    );
+    throw error; // Re-throw the error
+  }
+};
 
-        querySnapshot = await getDocs(q); // Use modular getDocs()
-        docsInCollection += querySnapshot.size;
-
-        if (querySnapshot.empty) {
+// --- Clearing Helper Functions --- (Now exclusively Web SDK)
+const clearData = async (db: WebFirestore, collectionsToClear: string[]) => {
+  console.log(
+    `      🧹 Clearing collections: ${collectionsToClear.join(", ")}...`
+  );
+  for (const collectionName of collectionsToClear) {
+    console.log(`      -> Clearing collection: ${collectionName}...`);
+    try {
+      const collectionRef = webCollection(db, collectionName);
+      // Fetch documents in batches to avoid memory issues (though less likely in emulator)
+      let querySnapshot;
+      let deletedCount = 0;
+      do {
+        const q = webQuery(collectionRef, webLimit(100)); // Process 100 docs at a time
+        querySnapshot = await webGetDocs(q);
+        if (!querySnapshot.empty) {
+          const batch = webWriteBatch(db);
+          querySnapshot.docs.forEach((doc) => {
+            batch.delete(doc.ref);
+          });
+          await batch.commit();
+          deletedCount += querySnapshot.size;
           console.log(
-            `    - [Clear] No more documents found in ${collectionName}.`
+            `         ...deleted ${querySnapshot.size} documents from ${collectionName}.`
           );
-          break; // Exit loop if no documents are found
-        }
-        console.log(
-          `    - [Clear] Fetched ${querySnapshot.size} documents batch from ${collectionName}. Preparing batch delete...`
-        );
-
-        const batch = writeBatch(db); // Use modular writeBatch()
-        querySnapshot.docs.forEach(
-          (doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => {
-            batch.delete(doc.ref); // batch.delete syntax remains the same
-          }
-        );
-
-        console.log(
-          `    - [Clear] Committing batch delete for ${querySnapshot.size} documents in ${collectionName}...`
-        );
-        await batch.commit(); // batch.commit syntax remains the same
-        totalDocsDeleted += querySnapshot.size;
-        console.log(
-          `    - ✅ [Clear] Successfully deleted ${querySnapshot.size} documents batch from ${collectionName}`
-        );
-
-        // Check if we fetched less than the limit, meaning it's the last batch
-        if (querySnapshot.size < 100) {
+        } else {
           console.log(
-            `    - [Clear] Fetched last batch (${querySnapshot.size} docs) for ${collectionName}.`
+            `         Collection ${collectionName} is empty or finished.`
           );
-          break;
         }
-      }
-
+        // Check if the loop should continue. If the snapshot size is less than the limit,
+        // it means we've processed the last batch.
+      } while (querySnapshot.size === 100);
       console.log(
-        `    - Finished clearing ${collectionName}. Total docs deleted in this collection: ${docsInCollection}`
+        `      - ✅ Cleared collection: ${collectionName} (Total ${deletedCount} docs deleted).`
+      );
+    } catch (error: any) {
+      console.error(
+        `      - ❌ Error clearing collection ${collectionName}:`,
+        error
+      );
+      // Decide if we should continue or stop on error
+      throw new Error(
+        `Failed to clear collection ${collectionName}: ${error.message}`
       );
     }
+  }
+  console.log(`      ✨ Collections cleared.`);
+};
 
+/**
+ * Clears specified collections from the Firestore database (emulator or cloud) using the Web SDK.
+ */
+export const clearEmulatorData = async () => {
+  const target = useEmulator ? "emulator" : "CLOUD database";
+  console.log(
+    `🗑️ [Clear] Starting data clearing process using Web SDK for ${target}...`
+  );
+
+  // Use the imported webDb directly
+  const db = webDb;
+  const collections = ["users", "classes", "sessions", "userClasses"]; // Add other top-level collections if needed
+
+  // Connection Test (Optional but recommended before destructive action)
+  try {
     console.log(
-      `🧹 [Clear] Emulator data cleared successfully: ${totalDocsDeleted} documents deleted in total.`
+      `   -> [Clear] Verifying connection using Web SDK to ${target}...`
+    );
+    const testDocRef = webDoc(
+      db,
+      "_clear_connection_test",
+      `web_${Date.now()}`
+    );
+    await webSetDoc(testDocRef, {
+      timestamp: webServerTimestamp(),
+      sdk: "Web SDK",
+      target,
+    });
+    await webDeleteDoc(testDocRef); // Clean up test doc
+    console.log(
+      `   ✅ [Clear] Connection test successful via Web SDK to ${target}.`
+    );
+  } catch (error: any) {
+    console.error(
+      `   ❌ [Clear] Connection test failed via Web SDK to ${target}:`,
+      error
     );
     Alert.alert(
-      "Success",
-      `Cleared ${totalDocsDeleted} documents from the emulator`
+      "Clearing Error",
+      `Connection test failed for ${target}. Cannot clear data. Error: ${error.message}`
     );
-  } catch (error) {
-    console.error("❌ [Clear] Error clearing emulator data:", error);
-    const errorMessage =
-      error instanceof Error ? error.message : JSON.stringify(error);
-    console.error(`   Error details: ${errorMessage}`);
-    if (error instanceof Error && error.stack) {
-      console.error(`   Stack trace: ${error.stack}`);
-    }
+    throw new Error(`Connection failed via Web SDK to ${target}`);
+  }
+
+  // Proceed with clearing
+  try {
+    await clearData(db, collections);
+    console.log(
+      `✅ [Clear] Data clearing completed successfully for ${target}!`
+    );
+    Alert.alert("Success", `Data cleared successfully (${target})!`);
+  } catch (error: any) {
+    console.error(
+      `❌ [Clear] Error during clearing via Web SDK for ${target}:`,
+      error
+    );
     Alert.alert(
-      "Error Clearing Data",
-      `Failed to clear emulator data: ${errorMessage}. See console for details.`
+      "Clearing Error",
+      `An error occurred during clearing (${target}): ${error.message}`
     );
-    throw error; // Re-throw to be handled by the caller in seedEmulator
+    throw error; // Re-throw
   }
 };

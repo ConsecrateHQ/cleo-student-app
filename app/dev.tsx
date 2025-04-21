@@ -16,24 +16,58 @@ import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
 import LocationPermissionButton from "../components/LocationPermissionButton";
 import { seedEmulator, clearEmulatorData } from "../utils/seedEmulator";
+
+// Web SDK imports
 import {
-  FirebaseFirestoreTypes,
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  setDoc,
-  addDoc,
-  query,
-  where,
-  getDocs,
-  updateDoc,
-  deleteDoc,
-  Timestamp,
-  GeoPoint,
-  limit,
-} from "@react-native-firebase/firestore";
-import { app } from "../utils/firebaseConfig";
+  collection as webCollection,
+  doc as webDoc,
+  getDoc as webGetDoc,
+  setDoc as webSetDoc,
+  addDoc as webAddDoc,
+  query as webQuery,
+  where as webWhere,
+  getDocs as webGetDocs,
+  updateDoc as webUpdateDoc,
+  deleteDoc as webDeleteDoc,
+  Timestamp as webTimestamp,
+  GeoPoint as webGeoPoint,
+  limit as webLimit,
+  serverTimestamp as webServerTimestamp,
+  initializeFirestore as initializeWebFirestore,
+} from "firebase/firestore";
+
+// Import core Web SDK functions and config
+import { initializeApp, getApp, getApps } from "firebase/app";
+
+// React Native Firebase imports
+// import {
+//   FirebaseFirestoreTypes,
+//   getFirestore,
+//   collection as rnCollection,
+//   doc as rnDoc,
+//   getDoc as rnGetDoc,
+//   setDoc as rnSetDoc,
+//   addDoc as rnAddDoc,
+//   query as rnQuery,
+//   where as rnWhere,
+//   getDocs as rnGetDocs,
+//   updateDoc as rnUpdateDoc,
+//   deleteDoc as rnDeleteDoc,
+//   Timestamp as rnTimestamp,
+//   GeoPoint as rnGeoPoint,
+//   limit as rnLimit,
+// } from "@react-native-firebase/firestore";
+
+import {
+  webApp,
+  webDb,
+  // rnApp, // Remove RN App import
+  // rnDb, // Remove RN DB import
+  // useWebSDK, // Remove useWebSDK import
+  useEmulator,
+  firebaseConfig, // Import config
+  initializeFirebase, // Import initializeFirebase
+} from "../utils/firebaseConfig"; // Import SDK-specific variables
 
 interface ActionButtonProps {
   icon: React.ComponentProps<typeof Ionicons>["name"];
@@ -89,45 +123,75 @@ export default function DevScreen() {
     },
   });
 
-  const db = getFirestore(app);
-
-  // Test connection to Firestore
+  // Test connection to Firestore - Modified to create a single test document
   const handleTestConnection = async () => {
     setIsLoading((prev) => ({ ...prev, testConnection: true }));
-    try {
-      const q = query(collection(db, "classes"), limit(1));
-      const snapshot = await getDocs(q);
+    const target = useEmulator ? "Emulator" : "Cloud";
+    // Use a consistent collection name for easier verification
+    const testCollectionName = `_connection_tests`;
+    const testDocId = `dev_screen_${Platform.OS}_${Date.now()}`;
 
-      if (snapshot.empty) {
-        Alert.alert("Success", "Connected to Firebase! No classes found.");
-      } else {
-        Alert.alert(
-          "Success",
-          `Connected to Firebase! Found ${snapshot.size} class.`
-        );
-      }
-    } catch (err) {
+    const testData = {
+      timestamp: webServerTimestamp(),
+      message: `Connection test from dev.tsx (${target})`,
+      userId: user?.uid || "unknown",
+      platform: Platform.OS,
+      timestampClient: new Date().toISOString(),
+      targetInstance: target,
+    };
+
+    try {
+      console.log(
+        `Attempting to create test document in ${target} Firestore collection '${testCollectionName}' using configured 'webDb'...`
+      );
+
+      // Use the configured webDb instance
+      const testCollectionRef = webCollection(webDb, testCollectionName);
+      const testDocRef = webDoc(testCollectionRef, testDocId);
+
+      // Only Write
+      await webSetDoc(testDocRef, testData);
+      console.log(`[DevScreen] ✅ Created test doc in ${target}`);
+
       Alert.alert(
-        "Error",
-        `Failed to connect: ${err instanceof Error ? err.message : String(err)}`
+        `${target} Connection Write Success`,
+        `Successfully created a test document in the configured ${target} Firestore instance.\n\nCollection: ${testCollectionName}\nDocument ID: ${testDocId}\n\nPlease verify manually.`
+      );
+    } catch (err) {
+      console.error(
+        `[DevScreen] Error testing connection to ${target} Firestore:`,
+        err
+      );
+      Alert.alert(
+        "Connection Error",
+        `Failed to write to ${target} Firestore: ${
+          err instanceof Error ? err.message : String(err)
+        }`
       );
     } finally {
       setIsLoading((prev) => ({ ...prev, testConnection: false }));
     }
   };
 
-  // Seed the emulator with test data
-  const handleSeedEmulator = async () => {
+  // Seed the database (emulator or cloud based on config)
+  const handleSeedDatabase = async () => {
+    const target = useEmulator ? "emulator" : "CLOUD database";
     setIsLoading((prev) => ({ ...prev, seed: true }));
     try {
+      console.log(`[DevScreen] Seeding ${target}...`);
+      // seedEmulator uses the configured instance (via getFirestore(app) and initializeFirebase)
       await seedEmulator();
-      Alert.alert("Success", "Emulator seeded with test data!");
+      // The alert inside seedEmulator might be generic, consider adding a specific one here
+      Alert.alert("Success", `Database seeded successfully (${target})!`);
       // Fetch updated class data after seeding
       fetchClassData();
     } catch (err) {
+      console.error(`[DevScreen] Error seeding ${target}:`, err);
       Alert.alert(
         "Error",
-        `Failed to seed: ${err instanceof Error ? err.message : String(err)}`
+        `Failed to seed ${target}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
       );
     } finally {
       setIsLoading((prev) => ({ ...prev, seed: false }));
@@ -138,7 +202,8 @@ export default function DevScreen() {
   const handleClearEmulator = async () => {
     setIsLoading((prev) => ({ ...prev, clear: true }));
     try {
-      await clearEmulatorData();
+      // clearEmulatorData needs to be compatible with both SDKs or adapted
+      await clearEmulatorData(); // Assuming clearEmulatorData handles SDK choice internally
       Alert.alert("Success", "Emulator data cleared!");
       // Reset class state after clearing
       setClasses({
@@ -173,19 +238,19 @@ export default function DevScreen() {
 
     try {
       // Get CS101 class
-      const cs101Query = query(
-        collection(db, "classes"),
-        where("joinCode", "==", "CS101")
+      const cs101Query = webQuery(
+        webCollection(webDb, "classes"),
+        webWhere("joinCode", "==", "CS101")
       );
-      const cs101Snapshot = await getDocs(cs101Query);
+      const cs101Snapshot = await webGetDocs(cs101Query);
       const cs101Doc = cs101Snapshot.docs[0];
 
       // Get German A2 class
-      const germanQuery = query(
-        collection(db, "classes"),
-        where("joinCode", "==", "GERMA2")
+      const germanQuery = webQuery(
+        webCollection(webDb, "classes"),
+        webWhere("joinCode", "==", "GERMA2")
       );
-      const germanSnapshot = await getDocs(germanQuery);
+      const germanSnapshot = await webGetDocs(germanQuery);
       const germanDoc = germanSnapshot.docs[0];
 
       // Update class IDs
@@ -193,23 +258,25 @@ export default function DevScreen() {
 
       if (cs101Doc) {
         updatedClasses.CS101.id = cs101Doc.id;
-        // Check if user is enrolled
-        const userClassRef = doc(
-          db,
+        // Check if user is enrolled - ALWAYS use Web SDK
+        const userClassRefWeb = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           cs101Doc.id
         );
-        const userClassDoc = await getDoc(userClassRef);
-        updatedClasses.CS101.userIsEnrolled = userClassDoc.exists;
+        const userClassDocWeb = await webGetDoc(userClassRefWeb);
+        updatedClasses.CS101.userIsEnrolled = userClassDocWeb.exists();
 
         // Check for active session
-        const activeSessionQuery = query(
-          collection(db, "classes", cs101Doc.id, "sessions"),
-          where("isActive", "==", true)
+        // Note: Session structure might differ between SDK usages
+        const activeSessionQuery = webQuery(
+          webCollection(webDb, "classes", cs101Doc.id, "sessions"),
+          webWhere("isActive", "==", true), // Assuming 'isActive' field exists
+          webLimit(1)
         );
-        const activeSessionSnapshot = await getDocs(activeSessionQuery);
+        const activeSessionSnapshot = await webGetDocs(activeSessionQuery);
 
         if (!activeSessionSnapshot.empty) {
           updatedClasses.CS101.sessionId = activeSessionSnapshot.docs[0].id;
@@ -220,23 +287,24 @@ export default function DevScreen() {
 
       if (germanDoc) {
         updatedClasses.GermanA2.id = germanDoc.id;
-        // Check if user is enrolled
-        const userClassRef = doc(
-          db,
+        // Check if user is enrolled - ALWAYS use Web SDK
+        const userClassRefWebGerman = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           germanDoc.id
         );
-        const userClassDoc = await getDoc(userClassRef);
-        updatedClasses.GermanA2.userIsEnrolled = userClassDoc.exists;
+        const userClassDocWebGerman = await webGetDoc(userClassRefWebGerman);
+        updatedClasses.GermanA2.userIsEnrolled = userClassDocWebGerman.exists();
 
         // Check for active session
-        const activeSessionQuery = query(
-          collection(db, "classes", germanDoc.id, "sessions"),
-          where("isActive", "==", true)
+        const activeSessionQuery = webQuery(
+          webCollection(webDb, "classes", germanDoc.id, "sessions"),
+          webWhere("isActive", "==", true),
+          webLimit(1)
         );
-        const activeSessionSnapshot = await getDocs(activeSessionQuery);
+        const activeSessionSnapshot = await webGetDocs(activeSessionQuery);
 
         if (!activeSessionSnapshot.empty) {
           updatedClasses.GermanA2.sessionId = activeSessionSnapshot.docs[0].id;
@@ -272,54 +340,54 @@ export default function DevScreen() {
       // If user is already enrolled, remove them
       if (classInfo.userIsEnrolled) {
         // Remove from class's students subcollection
-        const studentRef = doc(
-          db,
+        const studentRef = webDoc(
+          webDb,
           "classes",
           classInfo.id,
           "students",
           user.uid
         );
-        await deleteDoc(studentRef);
+        await webDeleteDoc(studentRef);
 
         // Remove from user's classes
-        const userClassRef = doc(
-          db,
+        const userClassRef = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           classInfo.id
         );
-        await deleteDoc(userClassRef);
+        await webDeleteDoc(userClassRef);
 
         Alert.alert("Success", `User removed from ${classInfo.name}!`);
       } else {
         // Add user to class's students subcollection
-        const studentRef = doc(
-          db,
+        const studentRef = webDoc(
+          webDb,
           "classes",
           classInfo.id,
           "students",
           user.uid
         );
-        await setDoc(studentRef, {
+        await webSetDoc(studentRef, {
           userId: user.uid,
           displayName: user.displayName || "Unknown User",
           email: user.email || "unknown@example.com",
-          enrolledAt: Timestamp.now(),
+          enrolledAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
         });
 
         // Add class to user's classes
-        const userClassRef = doc(
-          db,
+        const userClassRef = webDoc(
+          webDb,
           "userClasses",
           user.uid,
           "classes",
           classInfo.id
         );
-        await setDoc(userClassRef, {
+        await webSetDoc(userClassRef, {
           classId: classInfo.id,
           className: classInfo.name,
-          joinedAt: Timestamp.now(),
+          joinedAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
         });
 
         Alert.alert("Success", `User added to ${classInfo.name}!`);
@@ -357,24 +425,29 @@ export default function DevScreen() {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           try {
-            // Add new session document
-            const sessionsCollectionRef = collection(
-              db,
+            // Add new session document - ALWAYS use Web SDK
+            const sessionsCollectionRef = webCollection(
+              webDb,
               "classes",
               classInfo.id,
               "sessions"
             );
 
-            const newSessionRef = await addDoc(sessionsCollectionRef, {
+            const sessionData = {
               createdBy: user?.uid,
-              createdAt: Timestamp.now(),
+              createdAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
               isActive: true,
-              location: new GeoPoint(
+              location: new webGeoPoint(
                 position.coords.latitude,
                 position.coords.longitude
               ),
               radiusMeters: 100, // Default radius
-            });
+            };
+
+            const newSessionRef = await webAddDoc(
+              sessionsCollectionRef,
+              sessionData
+            );
 
             Alert.alert(
               "Success",
@@ -435,19 +508,21 @@ export default function DevScreen() {
       }
 
       // Update the session document
-      const sessionRef = doc(
-        db,
+      const sessionRef = webDoc(
+        webDb,
         "classes",
         classInfo.id,
         "sessions",
         classInfo.sessionId
       );
 
-      await updateDoc(sessionRef, {
+      const updateData = {
         isActive: false,
-        endedAt: Timestamp.now(),
+        endedAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
         endedBy: user?.uid,
-      });
+      };
+
+      await webUpdateDoc(sessionRef, updateData);
 
       Alert.alert("Success", `Session for ${classInfo.name} deactivated!`);
 
@@ -522,31 +597,70 @@ export default function DevScreen() {
         <Text style={styles.sectionTitle}>Firebase Emulators</Text>
 
         <Text style={styles.emulatorInfo}>
-          Status: Using emulator ({app.name}). Check logs for host/port.
+          Status:{" "}
+          {useEmulator
+            ? `🔥 Using Firebase Emulator (${
+                webApp?.name || "default"
+              }). Operations target the emulator.`
+            : `☁️ Using REAL Firebase instance (${
+                webApp?.name || "default"
+              }). Operations target the cloud.`}
         </Text>
 
         <ActionButton
+          icon="information-circle-outline"
+          text="Firebase Mode Info"
+          onPress={() =>
+            Alert.alert(
+              "Firebase Configuration",
+              "To toggle between Firebase emulator and real Firebase:\n\n1. Open utils/firebaseConfig.ts\n2. Change the 'useEmulator' boolean value\n3. Restart the app",
+              [{ text: "OK", style: "default" }]
+            )
+          }
+          isLoading={false}
+          loadingText=""
+        />
+
+        <ActionButton
           icon="flash-outline"
-          text="Test Connection to Firestore"
+          text={`Test Connection to ${useEmulator ? "Emulator" : "Cloud"}`}
           onPress={handleTestConnection}
           isLoading={isLoading.testConnection}
-          loadingText="Testing connection..."
+          loadingText={`Testing ${useEmulator ? "Emulator" : "Cloud"}...`}
         />
 
         <ActionButton
           icon="leaf-outline"
-          text="Seed Test Data"
-          onPress={handleSeedEmulator}
+          text={useEmulator ? "Seed Emulator" : "Seed Cloud Database"}
+          onPress={handleSeedDatabase}
           isLoading={isLoading.seed}
-          loadingText="Seeding data..."
+          loadingText={useEmulator ? "Seeding emulator..." : "Seeding cloud..."}
         />
 
         <ActionButton
           icon="trash-outline"
-          text="Clear All Data"
-          onPress={handleClearEmulator}
+          text={`Clear ${
+            useEmulator ? "Emulator" : "Cloud (Not Recommended)"
+          } Data`}
+          onPress={() => {
+            const target = useEmulator ? "emulator" : "CLOUD";
+            Alert.alert(
+              `Clear ${target} Data`,
+              `Are you sure you want to clear all data in the ${target}? This is ${
+                useEmulator ? "" : "NOT recommended and potentially "
+              }irreversible.`,
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: `Clear ${target}`,
+                  style: "destructive",
+                  onPress: handleClearEmulator, // Note: clearEmulatorData might need adjustment if intended for cloud
+                },
+              ]
+            );
+          }}
           isLoading={isLoading.clear}
-          loadingText="Clearing data..."
+          loadingText={`Clearing ${useEmulator ? "emulator" : "cloud"}...`}
         />
 
         <LocationPermissionButton />
