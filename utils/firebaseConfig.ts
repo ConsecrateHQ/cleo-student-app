@@ -72,7 +72,7 @@ export let webAuth: WebAuth;
 // export let rnAuth: FirebaseAuthTypes.Module;
 
 // --- Configuration Flags ---
-export const useEmulator = false; // Toggle this value to switch
+export const useEmulator = true; // Toggle this value to switch
 // export const useWebSDK = true; // Remove this flag
 
 // Host IP address must point to your machine's IP, not localhost

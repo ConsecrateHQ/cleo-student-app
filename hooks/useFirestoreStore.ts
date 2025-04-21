@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { createConverter } from "../utils/firebaseConfig";
-// Updated imports for v9+ modular syntax
+import { createConverter, webDb } from "../utils/firebaseConfig";
+// Updated imports for v9+ Web SDK syntax
 import {
   collection,
   query,
@@ -11,12 +11,11 @@ import {
   getDoc,
   setDoc,
   Timestamp,
+  GeoPoint,
   writeBatch,
-  getFirestore,
-} from "@react-native-firebase/firestore";
+} from "firebase/firestore";
 // Import necessary types directly from the namespace
-import type { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
-import { app } from "../utils/firebaseConfig"; // Import shared app instance
+// import type { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
 
 // Types based on the database schema from the .cursor/rules/database.mdc
 export interface User {
@@ -24,7 +23,7 @@ export interface User {
   email: string;
   displayName: string;
   role: "teacher" | "student";
-  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
+  created_at: Timestamp; // Use Web SDK Timestamp
   joinCode?: string;
 }
 
@@ -33,19 +32,19 @@ export interface Class {
   name: string;
   teacherId: string;
   joinCode?: string;
-  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
+  created_at: Timestamp; // Use Web SDK Timestamp
 }
 
 export interface Session {
   sessionId: string;
   classId: string;
   teacherId: string;
-  startTime: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
-  endTime: FirebaseFirestoreTypes.Timestamp | null; // Or Timestamp
+  startTime: Timestamp; // Use Web SDK Timestamp
+  endTime: Timestamp | null; // Use Web SDK Timestamp
   status: "scheduled" | "active" | "ended" | "cancelled";
-  location: FirebaseFirestoreTypes.GeoPoint; // Use namespace directly
+  location: GeoPoint; // Use Web SDK GeoPoint
   radius: number;
-  created_at: FirebaseFirestoreTypes.Timestamp; // Or Timestamp
+  created_at: Timestamp; // Use Web SDK Timestamp
 }
 
 // Type converters for Firestore (defined but not used on collections directly)
@@ -53,23 +52,23 @@ const userConverter = createConverter<User>();
 const classConverter = createConverter<Class>();
 const sessionConverter = createConverter<Session>();
 
-// Collection references WITHOUT withConverter
+// Collection references WITHOUT withConverter, using webDb
 const usersCollection = () => {
-  return collection(getFirestore(app), "users");
+  return collection(webDb, "users");
 };
 
 const classesCollection = () => {
-  return collection(getFirestore(app), "classes");
+  return collection(webDb, "classes");
 };
 
 const sessionsCollection = () => {
-  return collection(getFirestore(app), "sessions");
+  return collection(webDb, "sessions");
 };
 
 // Get a typed reference to a specific user's classes subcollection
 // No converter needed here as we often just store IDs or simple data
 const userSpecificClassesCollection = (userId: string) => {
-  return collection(getFirestore(app), `userClasses/${userId}/classes`);
+  return collection(webDb, `userClasses/${userId}/classes`);
 };
 
 // Store interface
@@ -159,7 +158,7 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
       // Get the full class details for each class ID
       const classIds = snapshot.docs.map((docSnap) => docSnap.id);
       // Use base collection ref for doc() calls
-      const classesColRef = collection(getFirestore(app), "classes");
+      const classesColRef = collection(webDb, "classes");
       const classPromises = classIds.map((id) =>
         getDoc(doc(classesColRef, id))
       );
@@ -220,20 +219,21 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   createClass: async (newClass) => {
     // Explicitly return Promise<string>
     try {
-      const db = getFirestore(app);
+      // const db = getFirestore(app); // Removed, use webDb
       // Create ref in base collection
-      const classesColRef = collection(getFirestore(app), "classes");
+      // Use webDb instead of getFirestore(app)
+      const classesColRef = collection(webDb, "classes");
       const classRef = doc(classesColRef);
 
       // Prepare class data
       const classData: Class = {
         ...newClass,
         classId: classRef.id,
-        created_at: Timestamp.now(),
+        created_at: Timestamp.fromDate(new Date()),
         // joinCode is optional and added by cloud function
       };
 
-      const batch = writeBatch(db);
+      const batch = writeBatch(webDb);
       // Set data using the untyped ref (Firestore handles the object)
       batch.set(classRef, classData);
 
@@ -241,7 +241,7 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
         userSpecificClassesCollection(newClass.teacherId),
         classRef.id
       );
-      batch.set(userClassRef, { added_at: Timestamp.now() });
+      batch.set(userClassRef, { added_at: Timestamp.fromDate(new Date()) });
 
       await batch.commit();
 
@@ -266,15 +266,17 @@ const useFirestoreStore = create<FirestoreState>((set, get) => ({
   createSession: async (newSession): Promise<string> => {
     // Explicit return type
     try {
+      // const db = getFirestore(app); // Removed, use webDb
       // Create ref in base collection
-      const sessionsColRef = collection(getFirestore(app), "sessions");
-      const sessionRef = doc(sessionsColRef);
+      // Use webDb directly
+      const sessionColRef = collection(webDb, "sessions");
+      const sessionRef = doc(sessionColRef);
 
       // Prepare session data
       const sessionData: Session = {
         ...newSession,
         sessionId: sessionRef.id,
-        created_at: Timestamp.now(),
+        created_at: Timestamp.fromDate(new Date()),
       };
 
       // Save to Firestore using untyped ref

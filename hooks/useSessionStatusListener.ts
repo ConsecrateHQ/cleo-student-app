@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { doc, onSnapshot } from "@react-native-firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
+import { webDb } from "../utils/firebaseConfig";
 import useAuthStore from "./useAuthStore";
 import { getClassDetails } from "../utils/firebaseClassSessionHelpers";
 
@@ -26,9 +27,8 @@ export const useSessionStatusListener = (sessionId: string | null) => {
       `Setting up session status listener for sessionId: ${sessionId}`
     );
 
-    // Reference to the session document
-    const db = require("@react-native-firebase/firestore").default();
-    const sessionRef = doc(db, "sessions", sessionId);
+    // Reference to the session document using Web SDK and webDb
+    const sessionRef = doc(webDb, "sessions", sessionId);
 
     // Set up the snapshot listener
     const unsubscribe = onSnapshot(

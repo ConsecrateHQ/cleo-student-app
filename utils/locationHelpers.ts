@@ -1,4 +1,4 @@
-import { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
+import { GeoPoint } from "firebase/firestore";
 
 interface Coordinates {
   latitude: number;
@@ -39,7 +39,7 @@ export function calculateDistance(
  * @returns True if the point is within the radius, false otherwise.
  */
 export function isWithinRadius(
-  center: FirebaseFirestoreTypes.GeoPoint | Coordinates,
+  center: GeoPoint | Coordinates,
   point: Coordinates,
   radius: number
 ): boolean {
@@ -82,7 +82,7 @@ export function isWithinRadius(
  * @returns True if the student's location is valid for attendance, false otherwise
  */
 export function validateLocationForSession(
-  sessionLocation: FirebaseFirestoreTypes.GeoPoint | Coordinates,
+  sessionLocation: GeoPoint | Coordinates,
   studentLocation: Coordinates,
   attendanceRadius: number = 100 // Default radius of 100 meters
 ): boolean {

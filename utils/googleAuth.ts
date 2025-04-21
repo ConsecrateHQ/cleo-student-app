@@ -7,12 +7,19 @@ import {
 import { FirebaseAuthTypes } from "@react-native-firebase/auth";
 // Use modular imports from @react-native-firebase/auth for functions
 import {
-  getAuth,
-  signInWithCredential,
-  GoogleAuthProvider,
-  signOut as firebaseSignOut, // Alias signOut to avoid naming conflict
+  getAuth as getRNAuth,
+  signInWithCredential as signInWithCredentialNative,
+  GoogleAuthProvider as GoogleAuthProviderNative,
+  signOut as firebaseSignOutNative,
 } from "@react-native-firebase/auth";
-import { app } from "./firebaseConfig"; // Import shared app instance
+// Import Web SDK auth functions and types
+import {
+  GoogleAuthProvider as GoogleAuthProviderWeb,
+  signInWithCredential as signInWithCredentialWeb,
+  signOut as firebaseSignOutWeb,
+  User as WebUser, // Import Web User type
+} from "firebase/auth";
+import { webApp, webAuth } from "./firebaseConfig"; // Import Web app and auth instance
 
 // Configure Google Sign In - Call this once at app startup
 // Using 'autoDetect' assumes you have firebase config files setup correctly
@@ -25,8 +32,9 @@ GoogleSignin.configure({
 // Sign in function
 export const signInWithGoogle =
   async (): Promise<FirebaseAuthTypes.UserCredential | null> => {
-    // Get the auth instance using the modular API
-    const authInstance = getAuth(app); // Use imported app
+    // Get the NATIVE auth instance
+    const nativeAuthInstance = getRNAuth(); // Use alias if needed, but getRNAuth is clear
+
     try {
       // Check if device has Google Play Services installed & up-to-date
       // Recommended for Android
@@ -35,30 +43,74 @@ export const signInWithGoogle =
       });
 
       // Get the users ID token
-      // The response object contains a 'data' property holding the user info on success
+      console.log("[googleAuth] Calling GoogleSignin.signIn()...");
       const response = await GoogleSignin.signIn();
-
-      // Check if idToken exists in the response data to determine success
-      const idToken = response?.data?.idToken; // Use optional chaining
+      console.log(
+        "[googleAuth] GoogleSignin.signIn() response:",
+        JSON.stringify(response, null, 2)
+      );
+      const idToken = (response as any)?.data?.idToken; // Access idToken via nested data property
 
       if (!idToken) {
-        // Handle cancellation or failure where idToken is not received
         console.log(
-          "Google Sign-In cancelled or failed: No ID token received."
+          "[googleAuth] Google Sign-In cancelled or failed: No ID token received."
         );
         return null;
       }
 
-      // Create a Google credential with the token using the modular GoogleAuthProvider
-      const googleCredential = GoogleAuthProvider.credential(idToken);
+      // --- Native Firebase Sign-In ---
+      console.log("[googleAuth] Attempting Native Firebase Sign-In...");
+      const nativeGoogleCredential =
+        GoogleAuthProviderNative.credential(idToken);
+      const nativeUserCredential: FirebaseAuthTypes.UserCredential =
+        await signInWithCredentialNative(
+          nativeAuthInstance,
+          nativeGoogleCredential
+        );
+      console.log(
+        "[googleAuth] ✅ Signed in with Native Firebase! User:",
+        nativeUserCredential.user?.uid
+      );
 
-      // Sign-in the user with the credential using the modular signInWithCredential
-      const userCredential: FirebaseAuthTypes.UserCredential =
-        await signInWithCredential(authInstance, googleCredential);
-      console.log("Signed in with Google!", userCredential.user);
-      return userCredential;
+      // --- Web Firebase Sign-In (Bridging) ---
+      try {
+        console.log(
+          "[googleAuth] Attempting Web Firebase Sign-In (Bridging)..."
+        );
+        const webGoogleCredential = GoogleAuthProviderWeb.credential(idToken);
+        // Use the imported webAuth instance from firebaseConfig
+        const webUserCredential = await signInWithCredentialWeb(
+          webAuth,
+          webGoogleCredential
+        );
+        const webUser: WebUser = webUserCredential.user; // Get the Web SDK user
+        console.log(
+          "[googleAuth] ✅ Signed in with Web Firebase! User:",
+          webUser?.uid // Log Web SDK user UID
+        );
+        console.log(
+          "[googleAuth]   Web SDK currentUser:",
+          webAuth.currentUser?.uid
+        ); // Confirm context is set
+      } catch (webError) {
+        console.error(
+          "[googleAuth] ❌ Error during Web Firebase Sign-In:",
+          webError
+        );
+        // Decide if this error should prevent the whole flow or just be logged
+        // For now, we'll log it but still return the native credential if that succeeded.
+        // Depending on requirements, you might want to sign out the native user here too.
+      }
+
+      // Return the NATIVE user credential as before (maintaining existing app flow)
+      return nativeUserCredential;
     } catch (error: any) {
-      console.error("Google Sign-In Error:", error);
+      console.error(
+        "[googleAuth] Error during Google Sign-In or Firebase bridging:",
+        error
+      );
+      console.error("[googleAuth] Error Code:", error?.code);
+      console.error("[googleAuth] Error Message:", error?.message);
       if (isErrorWithCode(error)) {
         switch (error.code) {
           case statusCodes.SIGN_IN_CANCELLED:
@@ -88,34 +140,63 @@ export const signInWithGoogle =
 
 // Sign out function
 export const signOut = async () => {
-  // Get the auth instance using the modular API
-  const authInstance = getAuth(app); // Use imported app
+  // Get the NATIVE auth instance
+  const nativeAuthInstance = getRNAuth();
+  // Web auth instance is already imported as webAuth
+
+  let googleSignOutError = null;
+  let nativeSignOutError = null;
+  let webSignOutError = null;
+
   try {
+    // 1. Try Google Signout
     try {
-      // Try Google signout operations, but don't fail if they error in DEV mode
-      await GoogleSignin.revokeAccess(); // Revoke Google access
-      await GoogleSignin.signOut(); // Sign out from Google
-    } catch (googleError) {
-      if (!__DEV__) {
-        console.error("Google Sign Out Error:", googleError);
-        throw googleError; // Re-throw in production
-      } else {
-        console.log(
-          "DEV mode: Google sign-out encountered an issue, but continuing with Firebase signout."
-        );
-      }
+      console.log("[googleAuth] Attempting Google SignOut...");
+      await GoogleSignin.revokeAccess();
+      await GoogleSignin.signOut();
+      console.log("[googleAuth] ✅ Google SignOut successful.");
+    } catch (error) {
+      googleSignOutError = error;
+      console.warn("[googleAuth] ⚠️ Google Sign Out Error:", error);
+      // Don't re-throw immediately, attempt Firebase signouts regardless
     }
 
-    // Always attempt Firebase signout
-    await firebaseSignOut(authInstance); // Sign out from Firebase using the modular API
-    console.log("User signed out successfully!");
-  } catch (error) {
-    console.error("Firebase Sign Out Error:", error);
-    if (__DEV__) {
-      // In DEV mode, we'll consider this a "successful" logout even if it fails
-      console.log("DEV mode: Ignoring Firebase signout error");
+    // 2. Try Native Firebase Signout
+    try {
+      console.log("[googleAuth] Attempting Native Firebase SignOut...");
+      await firebaseSignOutNative(nativeAuthInstance);
+      console.log("[googleAuth] ✅ Native Firebase SignOut successful.");
+    } catch (error) {
+      nativeSignOutError = error;
+      console.error("[googleAuth] ❌ Native Firebase Sign Out Error:", error);
+    }
+
+    // 3. Try Web Firebase Signout
+    try {
+      console.log("[googleAuth] Attempting Web Firebase SignOut...");
+      await firebaseSignOutWeb(webAuth); // Use imported webAuth instance
+      console.log("[googleAuth] ✅ Web Firebase SignOut successful.");
+    } catch (error) {
+      webSignOutError = error;
+      console.error("[googleAuth] ❌ Web Firebase Sign Out Error:", error);
+    }
+
+    // 4. Final error handling (re-throw in production if any critical step failed)
+    if (!__DEV__) {
+      if (googleSignOutError || nativeSignOutError || webSignOutError) {
+        // Optionally create a composite error
+        throw new Error("Sign out failed. See logs for details.");
+      }
     } else {
-      throw error; // Re-throw in production
+      console.log(
+        "[googleAuth] DEV mode: Sign out process complete (errors ignored)."
+      );
+    }
+  } catch (error) {
+    // Catch errors re-thrown in production
+    console.error("[googleAuth] Sign Out failed critically:", error);
+    if (!__DEV__) {
+      throw error; // Re-throw final error in production
     }
   }
 };

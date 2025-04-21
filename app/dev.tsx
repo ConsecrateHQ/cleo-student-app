@@ -248,7 +248,7 @@ export default function DevScreen() {
       // Get German A2 class
       const germanQuery = webQuery(
         webCollection(webDb, "classes"),
-        webWhere("joinCode", "==", "GERMA2")
+        webWhere("joinCode", "==", "GER102")
       );
       const germanSnapshot = await webGetDocs(germanQuery);
       const germanDoc = germanSnapshot.docs[0];

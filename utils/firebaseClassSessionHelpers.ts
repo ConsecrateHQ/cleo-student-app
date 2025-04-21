@@ -1,36 +1,33 @@
 import {
-  getFirestore,
   collection,
   doc,
   onSnapshot,
   getDoc,
-  getDocs, // Import getDocs for fetching multiple documents
+  getDocs,
   query,
   where,
   limit,
-  writeBatch, // Import writeBatch for atomic operations
-  serverTimestamp, // Import serverTimestamp
-  deleteDoc, // Import deleteDoc
-  collectionGroup, // Import collectionGroup for querying across subcollections
-  orderBy, // Import orderBy if needed for specific queries
-  Unsubscribe, // Import Unsubscribe type
-  FirestoreError, // Import FirestoreError for error handling
-  FirebaseFirestoreTypes,
-  // Types are typically accessed via the namespace
-  // QuerySnapshot, // No - use FirebaseFirestoreTypes.QuerySnapshot
-  // DocumentSnapshot, // No - use FirebaseFirestoreTypes.DocumentSnapshot
+  writeBatch,
+  serverTimestamp,
+  deleteDoc,
+  collectionGroup,
+  orderBy,
+  Unsubscribe,
+  FirestoreError,
+  DocumentSnapshot,
   updateDoc,
   setDoc,
-  GeoPoint, // Import GeoPoint directly
-} from "@react-native-firebase/firestore";
-import { UserClass } from "../hooks/useUserClasses"; // Assuming UserClass interface is needed here or define locally
+  GeoPoint,
+  Timestamp,
+  FieldValue,
+} from "firebase/firestore";
+import { webDb } from "./firebaseConfig";
+import { UserClass } from "../hooks/useUserClasses";
 import {
   validateLocationForSession,
   isWithinRadius,
   calculateDistance,
 } from "../utils/locationHelpers";
-
-const db = getFirestore(); // Get Firestore instance
 
 /**
  * Basic structure for class data stored under /userClasses/{userId}/classes/{classId}
@@ -38,7 +35,7 @@ const db = getFirestore(); // Get Firestore instance
 interface BaseUserClassInfo {
   classId: string;
   className: string;
-  joinDate: FirebaseFirestoreTypes.Timestamp;
+  joinDate: Timestamp;
 }
 
 /**
@@ -67,8 +64,8 @@ interface UserDetails {
 interface ActiveSessionData {
   sessionId: string;
   classId: string;
-  location: FirebaseFirestoreTypes.GeoPoint | null;
-  startTime: FirebaseFirestoreTypes.Timestamp;
+  location: GeoPoint | null;
+  startTime: Timestamp;
   // Add other relevant fields from the /sessions/{sessionId} document
 }
 
@@ -85,7 +82,7 @@ export function onStudentClassListUpdate(
   callback: (classes: BaseUserClassInfo[]) => void,
   onError: (error: FirestoreError) => void
 ): Unsubscribe {
-  const userClassesRef = collection(db, "userClasses", userId, "classes");
+  const userClassesRef = collection(webDb, "userClasses", userId, "classes");
 
   const unsubscribe = onSnapshot(
     userClassesRef,
@@ -96,7 +93,7 @@ export function onStudentClassListUpdate(
       }
       const classes: BaseUserClassInfo[] = snapshot.docs.map((docSnapshot) => ({
         classId: docSnapshot.id,
-        ...(docSnapshot.data() as Omit<BaseUserClassInfo, "classId">), // Assumes data matches BaseUserClassInfo structure
+        ...(docSnapshot.data() as Omit<BaseUserClassInfo, "classId">),
       }));
       callback(classes);
     },
@@ -119,14 +116,10 @@ export async function getClassDetails(
   classId: string
 ): Promise<ClassDetails | null> {
   try {
-    const classDocRef = doc(db, "classes", classId);
-    // Use the namespace for the type
-    const classDoc: FirebaseFirestoreTypes.DocumentSnapshot = await getDoc(
-      classDocRef
-    );
+    const classDocRef = doc(webDb, "classes", classId);
+    const classDoc: DocumentSnapshot = await getDoc(classDocRef);
 
-    if (!classDoc.exists) {
-      // Use exists property
+    if (!classDoc.exists()) {
       console.warn(`Class details not found for classId: ${classId}`);
       return null;
     }
@@ -136,7 +129,7 @@ export async function getClassDetails(
     };
   } catch (error) {
     console.error(`Failed to fetch details for class ${classId}:`, error);
-    throw error; // Re-throw or handle as needed
+    throw error;
   }
 }
 
@@ -150,14 +143,10 @@ export async function getUserDetails(
   userId: string
 ): Promise<UserDetails | null> {
   try {
-    const userDocRef = doc(db, "users", userId);
-    // Use the namespace for the type
-    const userDoc: FirebaseFirestoreTypes.DocumentSnapshot = await getDoc(
-      userDocRef
-    );
+    const userDocRef = doc(webDb, "users", userId);
+    const userDoc: DocumentSnapshot = await getDoc(userDocRef);
 
-    if (!userDoc.exists) {
-      // Use exists property
+    if (!userDoc.exists()) {
       console.warn(`User details not found for userId: ${userId}`);
       return null;
     }
@@ -167,7 +156,7 @@ export async function getUserDetails(
     };
   } catch (error) {
     console.error(`Failed to fetch details for user ${userId}:`, error);
-    throw error; // Re-throw or handle as needed
+    throw error;
   }
 }
 
@@ -185,7 +174,7 @@ export function onActiveClassSessionUpdate(
   callback: (session: ActiveSessionData | null) => void,
   onError: (error: FirestoreError) => void
 ): Unsubscribe {
-  const sessionsRef = collection(db, "sessions");
+  const sessionsRef = collection(webDb, "sessions");
   const q = query(
     sessionsRef,
     where("classId", "==", classId),
@@ -197,9 +186,8 @@ export function onActiveClassSessionUpdate(
     q,
     (snapshot) => {
       if (snapshot.empty) {
-        callback(null); // No active session found
+        callback(null);
       } else {
-        // Assuming only one active session possible due to limit(1)
         const sessionDoc = snapshot.docs[0];
         const sessionData = sessionDoc.data() as Omit<
           ActiveSessionData,
@@ -238,7 +226,12 @@ export async function getStudentClasses(
     return [];
   }
   try {
-    const userClassesRef = collection(db, "userClasses", studentId, "classes");
+    const userClassesRef = collection(
+      webDb,
+      "userClasses",
+      studentId,
+      "classes"
+    );
     const snapshot = await getDocs(userClassesRef);
 
     if (snapshot.empty) {
@@ -256,7 +249,7 @@ export async function getStudentClasses(
       `[getStudentClasses] Error fetching classes for student ${studentId}:`,
       error
     );
-    throw error; // Re-throw or handle as needed
+    throw error;
   }
 }
 
@@ -274,82 +267,59 @@ export async function joinClassWithCode(
   joinCode: string
 ): Promise<void> {
   if (!studentId || !joinCode) {
+    console.error("Student ID and Join Code are required.");
     throw new Error("Student ID and Join Code are required.");
   }
 
-  const classesRef = collection(db, "classes");
-  const q = query(classesRef, where("joinCode", "==", joinCode), limit(1));
+  console.log(
+    `Student ${studentId} attempting to join class with code ${joinCode}`
+  );
 
   try {
-    const snapshot = await getDocs(q);
+    const classesRef = collection(webDb, "classes");
+    const q = query(classesRef, where("joinCode", "==", joinCode), limit(1));
+    const querySnapshot = await getDocs(q);
 
-    if (snapshot.empty) {
-      throw new Error(`Invalid join code: ${joinCode}`);
+    if (querySnapshot.empty) {
+      console.error(`No class found with join code: ${joinCode}`);
+      throw new Error("Invalid join code.");
     }
 
-    const classDoc = snapshot.docs[0];
-    const classId = classDoc.id;
+    const classDoc = querySnapshot.docs[0];
     const classData = classDoc.data() as Omit<ClassDetails, "classId">;
+    const classId = classDoc.id;
+    const className = classData.name;
 
-    // Prepare batch write for atomicity
-    const batch = writeBatch(db);
+    console.log(`Found class: ${className} (ID: ${classId})`);
 
-    // 1. Add student to the /classes/{classId}/students subcollection
-    const studentInClassRef = doc(
-      db,
-      "classes",
-      classId,
-      "students",
-      studentId
+    const userClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/classes/${classId}`
     );
-    // Check if student already exists (optional, prevents overwriting joinDate)
-    const studentInClassSnap = await getDoc(studentInClassRef);
-    if (studentInClassSnap.exists) {
-      console.log(
-        `Student ${studentId} already enrolled in class ${classId}. Skipping join.`
+    const userClassDoc = await getDoc(userClassDocRef);
+    if (userClassDoc.exists()) {
+      console.warn(
+        `Student ${studentId} is already enrolled in class ${classId}`
       );
-      // Optionally throw an error or just return successfully
-      // throw new Error(`Student already enrolled in class ${classId}`);
-      return; // Exit function if already joined
+      return;
     }
-    batch.set(studentInClassRef, {
-      joinDate: serverTimestamp(),
-      // Add any other relevant student data if needed
-    });
 
-    // 2. Add class to the /userClasses/{studentId}/classes subcollection (denormalized)
-    const userClassRef = doc(db, "userClasses", studentId, "classes", classId);
-    batch.set(userClassRef, {
-      className: classData.name || "Unnamed Class", // Denormalize class name
-      joinDate: serverTimestamp(),
-      // Optionally denormalize teacher name if needed later
-      // teacherName: await getTeacherName(classData.teacherId), // Example
-    });
+    const batch = writeBatch(webDb);
 
-    // Commit the batch
+    const userClassData = {
+      className: className,
+      joinDate: serverTimestamp(),
+    };
+
+    batch.set(userClassDocRef, userClassData);
+
     await batch.commit();
     console.log(
-      `Student ${studentId} successfully joined class ${classId} using code ${joinCode}`
+      `Successfully added student ${studentId} to class ${className} (ID: ${classId})`
     );
   } catch (error) {
-    console.error(
-      `[joinClassWithCode] Error joining class with code ${joinCode} for student ${studentId}:`,
-      error
-    );
-    // Re-throw the specific error or a generic one
-    if (
-      error instanceof Error &&
-      error.message.startsWith("Invalid join code")
-    ) {
-      throw error;
-    }
-    if (
-      error instanceof Error &&
-      error.message.startsWith("Student already enrolled")
-    ) {
-      throw error;
-    }
-    throw new Error("Failed to join class. Please try again.");
+    console.error("Error joining class with code:", error);
+    throw error;
   }
 }
 
@@ -367,40 +337,37 @@ export async function leaveClass(
   classId: string
 ): Promise<void> {
   if (!studentId || !classId) {
+    console.error("Student ID and Class ID are required.");
     throw new Error("Student ID and Class ID are required.");
   }
 
-  try {
-    const batch = writeBatch(db);
+  console.log(`Student ${studentId} attempting to leave class ${classId}`);
 
-    // 1. Reference to student in /classes/{classId}/students subcollection
-    const studentInClassRef = doc(
-      db,
-      "classes",
-      classId,
-      "students",
-      studentId
+  try {
+    const userClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/classes/${classId}`
     );
 
-    // 2. Reference to class in /userClasses/{studentId}/classes subcollection
-    const userClassRef = doc(db, "userClasses", studentId, "classes", classId);
+    const docSnap = await getDoc(userClassDocRef);
+    if (!docSnap.exists()) {
+      console.warn(
+        `Student ${studentId} is not enrolled in class ${classId}, cannot leave.`
+      );
+      return;
+    }
 
-    // Add delete operations to the batch
-    // Note: deleteDoc doesn't fail if the doc doesn't exist, it just does nothing.
-    batch.delete(studentInClassRef);
-    batch.delete(userClassRef);
+    const batch = writeBatch(webDb);
 
-    // Commit the batch
+    batch.delete(userClassDocRef);
+
     await batch.commit();
     console.log(
-      `Student ${studentId} successfully removed from class ${classId}`
+      `Successfully removed student ${studentId} from class ${classId}`
     );
   } catch (error) {
-    console.error(
-      `[leaveClass] Error removing student ${studentId} from class ${classId}:`,
-      error
-    );
-    throw new Error("Failed to leave class. Please try again.");
+    console.error("Error leaving class:", error);
+    throw error;
   }
 }
 
@@ -420,36 +387,29 @@ export async function getActiveSessionsForStudent(
   }
 
   try {
-    // 1. Get the list of class IDs the student is enrolled in
     const studentClasses = await getStudentClasses(studentId);
     if (studentClasses.length === 0) {
-      return []; // Student is not enrolled in any classes
+      return [];
     }
     const studentClassIds = studentClasses.map((c) => c.classId);
 
-    // Firestore 'in' query limit (currently 30 in v9)
     if (studentClassIds.length > 30) {
       console.warn(
         `[getActiveSessionsForStudent] Student ${studentId} is in ${studentClassIds.length} classes. Querying sessions in batches of 30.`
       );
-      // Implement batching if necessary
-      // For now, we'll proceed but be aware of the limit
-      // Alternatively, could fetch active sessions first and filter locally, but might fetch too much data.
     }
 
-    // 2. Query the sessions collection for active sessions in those classes
-    const sessionsRef = collection(db, "sessions");
+    const sessionsRef = collection(webDb, "sessions");
     const q = query(
       sessionsRef,
       where("classId", "in", studentClassIds),
       where("status", "==", "active")
-      // Optional: Add orderBy('startTime', 'desc') if needed
     );
 
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) {
-      return []; // No active sessions found for this student's classes
+      return [];
     }
 
     const activeSessions: ActiveSessionData[] = snapshot.docs.map(
@@ -465,7 +425,6 @@ export async function getActiveSessionsForStudent(
       `[getActiveSessionsForStudent] Error fetching active sessions for student ${studentId}:`,
       error
     );
-    // Check if error is due to class fetching or session querying
     throw new Error("Failed to retrieve active sessions.");
   }
 }
@@ -475,13 +434,13 @@ export async function getActiveSessionsForStudent(
  * Based on /sessions/{sessionId}/attendance/{studentId}
  */
 export interface StudentAttendanceRecord {
-  sessionId: string; // Add sessionId to link back to the session
+  sessionId: string;
   classId: string;
-  checkInTime: FirebaseFirestoreTypes.Timestamp | null;
-  checkInLocation: FirebaseFirestoreTypes.GeoPoint | null;
-  status: string; // 'pending' | 'checked_in' | 'verified' | 'failed_location' | 'failed_other' | 'absent'
+  checkInTime: Timestamp | FieldValue | null;
+  checkInLocation: GeoPoint | null;
+  status: string;
   isGpsVerified: boolean;
-  lastUpdated: FirebaseFirestoreTypes.Timestamp;
+  lastUpdated: Timestamp | FieldValue;
 }
 
 /**
@@ -498,56 +457,67 @@ export async function getStudentAttendanceHistory(
   classId: string
 ): Promise<StudentAttendanceRecord[]> {
   if (!studentId || !classId) {
-    throw new Error("Student ID and Class ID are required.");
+    console.warn(
+      "[getStudentAttendanceHistory] Student ID and Class ID are required."
+    );
+    return [];
   }
 
   try {
-    const attendanceGroupRef = collectionGroup(db, "attendance");
-    const q = query(
-      attendanceGroupRef,
-      where("classId", "==", classId)
-      // Since document ID is studentId, we implicitly filter by studentId by structure
-      // If we needed to query across students for a class, we'd add a studentId field
-      // orderBy('checkInTime', 'desc') // Optional: Order history chronologically
-    );
+    const sessionsRef = collection(webDb, "sessions");
+    const sessionsQuery = query(sessionsRef, where("classId", "==", classId));
+    const sessionsSnapshot = await getDocs(sessionsQuery);
 
-    const snapshot = await getDocs(q);
+    if (sessionsSnapshot.empty) {
+      console.log(
+        `[getStudentAttendanceHistory] No sessions found for class ${classId}.`
+      );
+      return [];
+    }
 
-    const history: StudentAttendanceRecord[] = [];
-    snapshot.forEach((docSnapshot) => {
-      // We need to filter results manually as collectionGroup query doesn't filter by doc ID directly
-      if (docSnapshot.ref.parent.parent?.id) {
-        // Check if parent session exists
-        // Check if the document ID (studentId) matches
-        if (docSnapshot.id === studentId) {
-          history.push({
-            sessionId: docSnapshot.ref.parent.parent.id, // Get sessionId from path
-            ...(docSnapshot.data() as Omit<
-              StudentAttendanceRecord,
-              "sessionId"
-            >),
-          });
-        }
+    const sessionIds = sessionsSnapshot.docs.map((doc) => doc.id);
+
+    const attendancePromises = sessionIds.map(async (sessionId) => {
+      const attendanceDocRef = doc(
+        webDb,
+        "sessions",
+        sessionId,
+        "attendance",
+        studentId
+      );
+      const attendanceSnap = await getDoc(attendanceDocRef);
+      if (attendanceSnap.exists()) {
+        return {
+          ...(attendanceSnap.data() as Omit<
+            StudentAttendanceRecord,
+            "sessionId"
+          >),
+          sessionId: sessionId,
+        } as StudentAttendanceRecord;
       } else {
-        console.warn(
-          `[getStudentAttendanceHistory] Found attendance record with missing session path: ${docSnapshot.ref.path}`
-        );
+        return null;
       }
     });
 
-    // Optional: Sort history after fetching if not ordered in query
-    history.sort(
-      (a, b) =>
-        (b.checkInTime?.toMillis() ?? 0) - (a.checkInTime?.toMillis() ?? 0)
+    const attendanceRecords = (await Promise.all(attendancePromises)).filter(
+      (record): record is StudentAttendanceRecord => record !== null
     );
 
-    return history;
+    console.log(
+      `[getStudentAttendanceHistory] Found ${attendanceRecords.length} attendance records for student ${studentId} in class ${classId}.`
+    );
+    // Cast to Timestamp for sorting, as FieldValue is only relevant on write
+    return attendanceRecords.sort(
+      (a, b) =>
+        (b.lastUpdated as Timestamp).toMillis() -
+        (a.lastUpdated as Timestamp).toMillis()
+    );
   } catch (error) {
     console.error(
-      `[getStudentAttendanceHistory] Error fetching attendance history for student ${studentId} in class ${classId}:`,
+      `Error fetching attendance history for student ${studentId} in class ${classId}:`,
       error
     );
-    throw new Error("Failed to retrieve attendance history.");
+    throw error;
   }
 }
 
@@ -566,108 +536,102 @@ export async function checkInToSession(
   studentId: string,
   locationData: { latitude: number; longitude: number }
 ): Promise<void> {
-  if (!sessionId || !studentId) {
-    throw new Error("Session ID and Student ID are required.");
+  if (!sessionId || !studentId || !locationData) {
+    console.error("Session ID, Student ID, and Location Data are required.");
+    throw new Error("Session ID, Student ID, and Location Data are required.");
   }
 
+  console.log(
+    `Student ${studentId} attempting check-in for session ${sessionId} at location:`,
+    locationData
+  );
+
+  const sessionRef = doc(webDb, "sessions", sessionId);
+  const attendanceRef = doc(
+    webDb,
+    `sessions/${sessionId}/attendance/${studentId}`
+  );
+
   try {
-    // 1. Get the session data to verify it's active and get the classId
-    const sessionRef = doc(db, "sessions", sessionId);
     const sessionSnap = await getDoc(sessionRef);
-
-    if (!sessionSnap.exists) {
-      throw new Error(`Session ${sessionId} not found.`);
+    if (!sessionSnap.exists()) {
+      console.error(`Session ${sessionId} not found.`);
+      throw new Error("Session not found.");
     }
-
     const sessionData = sessionSnap.data();
-    if (!sessionData || sessionData.status !== "active") {
-      throw new Error(`Session ${sessionId} is not active.`);
-    }
+    const sessionLocation = sessionData.location as GeoPoint | null;
+    const sessionRadius = sessionData.radius as number | undefined;
 
-    const classId = sessionData.classId;
-    if (!classId) {
-      throw new Error(`Session ${sessionId} has no classId.`);
-    }
+    console.log("Session details:", { sessionLocation, sessionRadius });
 
-    // 2. Verify student is enrolled in the class
-    const studentInClassRef = doc(
-      db,
-      "classes",
-      classId,
-      "students",
-      studentId
-    );
-    const studentInClassSnap = await getDoc(studentInClassRef);
-
-    if (!studentInClassSnap.exists) {
-      throw new Error(
-        `Student ${studentId} is not enrolled in class ${classId}.`
-      );
-    }
-
-    // 3. Create GeoPoint from location data
-    // Use the directly imported GeoPoint constructor
-    const checkInLocation = new GeoPoint(
-      locationData.latitude,
-      locationData.longitude
-    );
-
-    // 4. Verify location is within the session's radius (if location validation is required)
     let isGpsVerified = false;
-    if (sessionData.location && typeof sessionData.radius === "number") {
-      // Use location helper to validate
-      const distance = calculateDistance(
-        {
-          latitude: sessionData.location.latitude,
-          longitude: sessionData.location.longitude,
-        },
-        locationData
+    let status = "checked_in";
+
+    if (sessionLocation && typeof sessionRadius === "number") {
+      console.log("Validating student location against session location...");
+      isGpsVerified = validateLocationForSession(
+        sessionLocation,
+        locationData,
+        sessionRadius
       );
-      isGpsVerified = distance <= sessionData.radius;
+      if (!isGpsVerified) {
+        status = "failed_location";
+        console.warn(
+          `Location validation failed for student ${studentId}, session ${sessionId}.`
+        );
+      } else {
+        console.log(
+          `Location validation successful for student ${studentId}, session ${sessionId}.`
+        );
+      }
+    } else {
+      console.log(
+        `Session ${sessionId} does not require location check or has invalid radius.`
+      );
+      isGpsVerified = true;
     }
 
-    // 5. Create attendance record
-    const attendanceRef = doc(
-      db,
-      "sessions",
-      sessionId,
-      "attendance",
-      studentId
-    );
-
-    // Check if an attendance record already exists
-    const attendanceSnap = await getDoc(attendanceRef);
-
-    // Prepare the attendance data
-    const attendanceData = {
-      classId: classId,
+    const attendanceData: Partial<StudentAttendanceRecord> = {
+      classId: sessionData.classId,
       checkInTime: serverTimestamp(),
-      checkInLocation: checkInLocation,
-      status: isGpsVerified ? "verified" : "failed_location",
+      checkInLocation: new GeoPoint(
+        locationData.latitude,
+        locationData.longitude
+      ),
+      status: status,
       isGpsVerified: isGpsVerified,
       lastUpdated: serverTimestamp(),
     };
 
-    // Create or update the record
-    if (attendanceSnap.exists) {
-      // Update existing record if student is re-checking in
-      const batch = writeBatch(db);
-      batch.update(attendanceRef, attendanceData);
-      await batch.commit();
-    } else {
-      // Create new attendance record
-      const batch = writeBatch(db);
-      batch.set(attendanceRef, attendanceData);
-      await batch.commit();
-    }
+    console.log("Preparing to write attendance data:", attendanceData);
+
+    await setDoc(attendanceRef, attendanceData, { merge: true });
 
     console.log(
-      `Student ${studentId} checked in to session ${sessionId} with status: ${
-        isGpsVerified ? "verified" : "failed_location"
-      }`
+      `Successfully recorded check-in (status: ${status}) for student ${studentId} in session ${sessionId}.`
     );
   } catch (error) {
-    console.error(`Error checking in to session ${sessionId}:`, error);
+    console.error(
+      `Error checking in student ${studentId} for session ${sessionId}:`,
+      error
+    );
+
+    try {
+      await setDoc(
+        attendanceRef,
+        {
+          status: "failed_other",
+          lastUpdated: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (failureLogError) {
+      console.error(
+        "Failed to even record the check-in failure:",
+        failureLogError
+      );
+    }
+
     throw error;
   }
 }
@@ -686,40 +650,37 @@ export async function checkOutFromSession(
   studentId: string
 ): Promise<void> {
   if (!sessionId || !studentId) {
+    console.error("Session ID and Student ID are required.");
     throw new Error("Session ID and Student ID are required.");
   }
 
+  console.log(
+    `Student ${studentId} attempting check-out for session ${sessionId}`
+  );
+
+  const attendanceRef = doc(
+    webDb,
+    `sessions/${sessionId}/attendance/${studentId}`
+  );
+
   try {
-    // 1. Verify the attendance record exists
-    const attendanceRef = doc(
-      db,
-      "sessions",
-      sessionId,
-      "attendance",
-      studentId
-    );
     const attendanceSnap = await getDoc(attendanceRef);
 
-    if (!attendanceSnap.exists) {
-      throw new Error(
-        `No attendance record found for student ${studentId} in session ${sessionId}.`
+    if (!attendanceSnap.exists()) {
+      console.warn(
+        `No attendance record found for student ${studentId} in session ${sessionId}. Cannot check out.`
       );
+      throw new Error("Check-in record not found.");
     }
 
-    // 2. Update the attendance record with check-out status and time
-    const batch = writeBatch(db);
-    batch.update(attendanceRef, {
-      status: "checked_out_early_before_verification", // Use the new status
-      checkOutTime: serverTimestamp(), // Add the check-out timestamp
-      lastUpdated: serverTimestamp(),
-    });
-    await batch.commit();
-
     console.log(
-      `Student ${studentId} checked out early from session ${sessionId}`
+      `Check-out process initiated/completed for student ${studentId} in session ${sessionId}.`
     );
   } catch (error) {
-    console.error(`Error checking out from session ${sessionId}:`, error);
+    console.error(
+      `Error checking out student ${studentId} from session ${sessionId}:`,
+      error
+    );
     throw error;
   }
 }
@@ -739,10 +700,10 @@ export async function getSessionStatus(
   }
 
   try {
-    const sessionRef = doc(db, "sessions", sessionId);
+    const sessionRef = doc(webDb, "sessions", sessionId);
     const sessionSnap = await getDoc(sessionRef);
 
-    if (!sessionSnap.exists) {
+    if (!sessionSnap.exists()) {
       console.warn(`Session ${sessionId} does not exist`);
       return null;
     }

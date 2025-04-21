@@ -1,9 +1,15 @@
 // app/hooks/useUserClasses.ts
 import { useEffect, useState, useRef, useCallback } from "react";
-import {
-  getFirestore,
-  FirebaseFirestoreTypes,
-} from "@react-native-firebase/firestore";
+// Remove react-native-firebase imports
+// import {
+//   getFirestore,
+//   FirebaseFirestoreTypes,
+// } from "@react-native-firebase/firestore";
+
+// Import Web SDK types and the configured Firestore instance
+import { Timestamp, GeoPoint } from "firebase/firestore";
+import { webDb } from "../utils/firebaseConfig"; // Assuming webDb is exported and configured
+
 import {
   onStudentClassListUpdate,
   getClassDetails,
@@ -18,17 +24,18 @@ export interface UserClass {
   classId: string;
   className: string;
   teacherName?: string;
-  joinDate: FirebaseFirestoreTypes.Timestamp;
+  joinDate: Timestamp; // Use Web SDK Timestamp type
   joinCode?: string;
   hasActiveSession: boolean;
-  location?: FirebaseFirestoreTypes.GeoPoint | null;
+  location?: GeoPoint | null; // Use Web SDK GeoPoint type
   sessionId?: string;
 }
 
 export function useUserClasses(userId: string | undefined) {
   const [classes, setClasses] = useState<UserClass[]>([]);
   const [loading, setLoading] = useState(true);
-  const db = getFirestore(); // Firestore instance might not be needed directly if helpers handle it
+  // Remove RNF getFirestore() call - assuming helpers use imported webDb
+  // const db = getFirestore();
 
   // Ref to store unsubscribe functions for active session listeners
   const sessionListenersRef = useRef<{ [classId: string]: () => void }>({});

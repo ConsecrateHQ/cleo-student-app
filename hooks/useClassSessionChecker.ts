@@ -11,7 +11,11 @@ import {
   validateLocationForSession,
   calculateDistance,
 } from "../utils/locationHelpers";
-import { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
+// Remove react-native-firebase import
+// import { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
+
+// Import Web SDK types
+import { Timestamp, GeoPoint } from "firebase/firestore";
 
 /**
  * Local interfaces to match the structures used in firebaseClassSessionHelpers
@@ -26,14 +30,14 @@ interface ClassDetails {
 interface BaseUserClassInfo {
   classId: string;
   className: string;
-  joinDate: FirebaseFirestoreTypes.Timestamp;
+  joinDate: Timestamp; // Use Web SDK Timestamp
 }
 
 interface ActiveSessionData {
   sessionId: string;
   classId: string;
-  location: FirebaseFirestoreTypes.GeoPoint | null;
-  startTime: FirebaseFirestoreTypes.Timestamp;
+  location: GeoPoint | null; // Use Web SDK GeoPoint
+  startTime: Timestamp; // Use Web SDK Timestamp
 }
 
 /**
