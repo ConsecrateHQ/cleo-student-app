@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, StatusBar, Alert, Dimensions } from "react-native";
+import {
+  StyleSheet,
+  StatusBar,
+  Alert,
+  Dimensions,
+  View,
+  ActivityIndicator,
+} from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet from "@gorhom/bottom-sheet";
 import theme from "../theme";
@@ -18,6 +25,8 @@ import { useCheckIn } from "../hooks/useCheckIn";
 import { useActiveSession } from "../hooks/useActiveSession";
 import { useSessionStatusListener } from "../hooks/useSessionStatusListener";
 import CongratulationsDrawer from "../components/CongratulationsDrawer";
+import { getClassDetails } from "../utils/firebaseClassSessionHelpers";
+import { Timestamp } from "firebase/firestore";
 
 const App = () => {
   // Refs and basic setup
@@ -26,8 +35,12 @@ const App = () => {
   const animatedPosition = useSharedValue(windowHeight);
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
+  const activeSessionInfo = useAuthStore((state) => state.activeSessionInfo);
+  const isRestoringSession = useAuthStore((state) => state.isRestoringSession);
+  const setActiveSessionInStore = useAuthStore(
+    (state) => state.setActiveSession
+  );
   const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const processedCheckRef = useRef<string | null>(null);
 
   // Custom hooks
@@ -35,8 +48,8 @@ const App = () => {
     activeSession,
     animations: sessionAnimations,
     showActiveSessionElements,
-    handleLeaveEarlyPress,
-    setActiveSession,
+    handleLeaveEarlyPress: originalHandleLeaveEarlyPress,
+    setActiveSession: setActiveSessionLocally,
   } = useActiveSession();
 
   // Session status listener hook
@@ -44,7 +57,7 @@ const App = () => {
     showCongratulations,
     hideCongratulations,
     className: endedClassName,
-  } = useSessionStatusListener(activeSession.sessionId || null);
+  } = useSessionStatusListener(activeSessionInfo?.sessionId || null);
 
   const {
     isChecking,
@@ -72,6 +85,12 @@ const App = () => {
     windowHeight,
     snapPoints: [140, windowHeight],
   });
+
+  // Wrap handleLeaveEarlyPress to clear store state as well
+  const handleLeaveEarlyPress = useCallback(async () => {
+    await originalHandleLeaveEarlyPress();
+    setActiveSessionInStore(null);
+  }, [originalHandleLeaveEarlyPress, setActiveSessionInStore]);
 
   // Effect to reset cancellation state when leaving a session
   useEffect(() => {
@@ -136,6 +155,7 @@ const App = () => {
       console.log("Processing successful check-in result:", pendingCheckResult);
 
       const sessionIdMatch = pendingCheckResult.sessionId || "";
+      const classIdMatch = pendingCheckResult.classId || ""; // Get classId
 
       // Extract the class name
       let className = "Class";
@@ -147,11 +167,12 @@ const App = () => {
 
       console.log("Extracted class name:", className);
       console.log("Session ID:", sessionIdMatch);
+      console.log("Class ID:", classIdMatch); // Log classId
 
       // Extra validation to ensure we have valid data
-      if (!className || !sessionIdMatch) {
+      if (!className || !sessionIdMatch || !classIdMatch) {
         console.error(
-          "Invalid className or sessionId, cannot activate session"
+          "Invalid className, sessionId, or classId, cannot activate session"
         );
         Alert.alert("Error", "Could not determine class details");
         return;
@@ -163,14 +184,25 @@ const App = () => {
         bottomSheetRef.current.collapse();
       }
 
-      // Show active session UI
+      // Show active session UI and Update store
       (async () => {
         try {
           console.log("Showing active session elements...");
           await showActiveSessionElements(className, sessionIdMatch);
           console.log("Active session state updated successfully");
+
+          // *** FIX: Update activeSessionInfo in the store ***
+          const now = Timestamp.now();
+          setActiveSessionInStore({
+            sessionId: sessionIdMatch,
+            classId: classIdMatch,
+            checkInTime: now, // Use current time for simplicity
+            lastUpdated: now, // Use current time for simplicity
+            joinTimestamp: Date.now(), // Store local timestamp when user joined
+          });
+          console.log("Active session info saved to store.");
         } catch (error) {
-          console.error("Error updating active session state:", error);
+          console.error("Error updating active session state or store:", error);
           Alert.alert(
             "Error",
             "Something went wrong processing your check-in."
@@ -185,6 +217,72 @@ const App = () => {
     isCheckInCancelled,
     checkCancellationRef,
     showActiveSessionElements,
+    setActiveSessionInStore,
+  ]);
+
+  // Effect to handle restoration of session from store
+  useEffect(() => {
+    if (activeSessionInfo && !activeSession.isActive && !isRestoringSession) {
+      console.log(
+        "[App Index] Restored session detected, activating UI:",
+        activeSessionInfo
+      );
+      // Fetch class name using classId from the restored session info
+      getClassDetails(activeSessionInfo.classId)
+        .then((classDetails) => {
+          if (classDetails) {
+            // Calculate initial time based on local joinTimestamp
+            const now = Date.now();
+            const joinTime = activeSessionInfo.joinTimestamp || now; // Fallback to now if missing
+            const initialElapsedSeconds = Math.floor((now - joinTime) / 1000);
+
+            console.log(
+              `[App Index] Restored Session - Class: ${classDetails.name}, Initial Elapsed: ${initialElapsedSeconds}s`
+            );
+
+            // Update lastUpdated time only
+            const updatedSessionInfo = {
+              ...activeSessionInfo,
+              lastUpdated: Timestamp.now(),
+            };
+            setActiveSessionInStore(updatedSessionInfo);
+
+            // Activate the session UI with fetched name and calculated time
+            showActiveSessionElements(
+              classDetails.name,
+              activeSessionInfo.sessionId,
+              initialElapsedSeconds
+            );
+          } else {
+            console.error(
+              `[App Index] Could not fetch class details for restored session: ${activeSessionInfo.classId}`
+            );
+            // Handle error - maybe clear the invalid session state?
+            setActiveSessionInStore(null);
+            Alert.alert(
+              "Error",
+              "Could not restore previous session details. Please check in again if needed."
+            );
+          }
+        })
+        .catch((error) => {
+          console.error(
+            "[App Index] Error fetching class details for restored session:",
+            error
+          );
+          setActiveSessionInStore(null);
+          Alert.alert(
+            "Error",
+            "Could not restore previous session details due to an error."
+          );
+        });
+    }
+  }, [
+    activeSessionInfo,
+    activeSession.isActive,
+    isRestoringSession,
+    showActiveSessionElements,
+    setActiveSessionInStore,
   ]);
 
   // Handle bottom sheet changes
@@ -216,7 +314,7 @@ const App = () => {
       sessionAnimations.leaveButtonTranslateY.value = 20;
 
       // Reset session state
-      setActiveSession({
+      setActiveSessionLocally({
         isActive: false,
         className: "",
         sessionId: "",
@@ -228,17 +326,30 @@ const App = () => {
       processedCheckRef.current = null;
       resetCancellationState();
 
+      // *** Also clear session state in the store ***
+      setActiveSessionInStore(null);
+
       console.log("Session ended and reset complete");
     }
   }, [
     hideCongratulations,
     activeSession,
     sessionAnimations,
-    setActiveSession,
+    setActiveSessionLocally,
     resetCancellationState,
+    setActiveSessionInStore,
   ]);
 
   console.log("Is DEV mode?", __DEV__);
+
+  // Show loading indicator while restoring session state
+  if (isRestoringSession) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color={theme.colors.button.primary} />
+      </View>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -317,6 +428,15 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  contentContainer: {
+    flex: 1,
+    alignItems: "center",
+  },
+  // Add centered style for loading indicator
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
   },
 });
 

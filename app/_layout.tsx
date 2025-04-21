@@ -13,7 +13,11 @@ import { initializeFirebase, webApp, webAuth } from "../utils/firebaseConfig";
 export default function RootLayout() {
   // Select state and actions separately for stable references
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
+  const user = useAuthStore((state) => state.user); // Get the user object
   const setUser = useAuthStore((state) => state.setUser);
+  const checkAndRestoreSession = useAuthStore(
+    (state) => state.checkAndRestoreSession
+  );
   const router = useRouter();
   const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [isFirebaseInitialized, setIsFirebaseInitialized] = useState(false);
@@ -47,6 +51,12 @@ export default function RootLayout() {
           firebaseUser?.uid ?? "null"
         );
         setUser(firebaseUser);
+
+        // If user is logged in, check for an existing session
+        if (firebaseUser) {
+          checkAndRestoreSession(firebaseUser.uid);
+        }
+
         if (!isAuthChecked) {
           setIsAuthChecked(true);
           console.log("[RootLayout] Initial auth check complete.");
@@ -58,7 +68,7 @@ export default function RootLayout() {
       console.log("[RootLayout] Cleaning up Auth listener.");
       unsubscribe();
     };
-  }, [setUser, isAuthChecked, isFirebaseInitialized]);
+  }, [setUser, isAuthChecked, isFirebaseInitialized, checkAndRestoreSession]);
 
   // Effect to handle navigation based on auth state and initial check
   useEffect(() => {

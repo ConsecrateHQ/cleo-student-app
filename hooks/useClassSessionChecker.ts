@@ -100,6 +100,7 @@ export interface SessionCheckResult {
   message: string;
   isAttending: boolean;
   sessionId?: string; // Optional session ID when attending a class
+  classId?: string; // Add classId here
   cancelled?: boolean; // Add flag for user cancellation
 }
 
@@ -575,6 +576,7 @@ export const useClassSessionChecker = () => {
         message,
         isAttending,
         sessionId: isAttending ? sessionId : undefined, // Only return sessionId if attending
+        classId: isAttending ? attendingClass?.classId : undefined, // Return classId if attending
       };
     } catch (error) {
       console.error("Error checking sessions:", error);

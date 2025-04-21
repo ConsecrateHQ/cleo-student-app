@@ -38,7 +38,8 @@ interface UseActiveSessionResult {
   animations: ActiveSessionAnimations;
   showActiveSessionElements: (
     className: string,
-    sessionId: string
+    sessionId: string,
+    initialElapsedSeconds?: number
   ) => Promise<void>;
   handleLeaveEarlyPress: () => Promise<void>;
   setActiveSession: React.Dispatch<React.SetStateAction<ActiveSessionState>>;
@@ -86,6 +87,7 @@ export const useActiveSession = (): UseActiveSessionResult => {
     let interval: NodeJS.Timeout | null = null;
 
     if (activeSession.isActive && !activeSession.timerInterval) {
+      // Update timer every 60 seconds (1 minute) since our timer displays in minutes
       interval = setInterval(() => {
         setActiveSession((prev) => ({
           ...prev,
@@ -121,9 +123,15 @@ export const useActiveSession = (): UseActiveSessionResult => {
   // Show active session elements
   const showActiveSessionElements = async (
     className: string,
-    sessionId: string
+    sessionId: string,
+    initialElapsedSeconds?: number
   ) => {
-    console.log("showActiveSessionElements called with:", className, sessionId);
+    console.log(
+      "showActiveSessionElements called with:",
+      className,
+      sessionId,
+      `Initial Seconds: ${initialElapsedSeconds}`
+    );
 
     if (!className || !sessionId) {
       console.error("Invalid parameters: className or sessionId is empty");
@@ -171,11 +179,16 @@ export const useActiveSession = (): UseActiveSessionResult => {
         return prevState;
       }
 
+      // Convert seconds to minutes for the timer display (rounds down to integer minutes)
+      const initialElapsedMinutes = initialElapsedSeconds
+        ? Math.floor(initialElapsedSeconds / 60)
+        : 0;
+
       console.log("Updating active session state to:", {
         isActive: true,
         className,
         sessionId,
-        timer: 0,
+        timer: initialElapsedMinutes,
         timerInterval: null,
       });
 
@@ -183,7 +196,7 @@ export const useActiveSession = (): UseActiveSessionResult => {
         isActive: true,
         className: className,
         sessionId: sessionId,
-        timer: 0,
+        timer: initialElapsedMinutes,
         timerInterval: null,
       };
     });
