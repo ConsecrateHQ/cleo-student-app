@@ -26,11 +26,9 @@ const wandSvg = `<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xml
 </svg>`;
 
 export default function LoginScreen() {
-  const login = useAuthStore((state) => state.login);
   const loginWithGoogle = useAuthStore((state) => state.loginWithGoogle);
 
   const handleLogin = () => {
-    login();
     router.replace("/");
   };
 

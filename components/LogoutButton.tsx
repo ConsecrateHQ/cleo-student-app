@@ -2,6 +2,7 @@ import React from "react";
 import { TouchableOpacity, Text, StyleSheet } from "react-native";
 import theme from "../theme";
 import useAuthStore from "../hooks/useAuthStore";
+import { router } from "expo-router";
 
 const LogoutButton = () => {
   const logout = useAuthStore((state) => state.logout);
@@ -12,7 +13,12 @@ const LogoutButton = () => {
     if (!user && __DEV__) {
       console.log("DEV mode: No user found, but resetting auth state anyway");
     }
-    await logout();
+    try {
+      await logout();
+      router.replace("/login");
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
   };
 
   return (
