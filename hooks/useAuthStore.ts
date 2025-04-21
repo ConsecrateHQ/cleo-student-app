@@ -2,15 +2,14 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { signInWithGoogle, signOut } from "../utils/googleAuth";
-import { FirebaseAuthTypes } from "@react-native-firebase/auth";
+import { User as WebUser } from "firebase/auth";
 
 type AuthState = {
   isLoggedIn: boolean;
-  login: () => void;
   logout: () => Promise<void>;
   loginWithGoogle: () => Promise<void>;
-  user: FirebaseAuthTypes.User | null;
-  setUser: (user: FirebaseAuthTypes.User | null) => void;
+  user: WebUser | null;
+  setUser: (user: WebUser | null) => void;
 };
 
 const useAuthStore = create<AuthState>()(
@@ -18,17 +17,17 @@ const useAuthStore = create<AuthState>()(
     (set, get) => ({
       isLoggedIn: false,
       user: null,
-      login: () => set({ isLoggedIn: true, user: null }),
       logout: async () => {
-        if (get().user) {
+        if (get().user || __DEV__) {
           try {
             await signOut();
+            set({ user: null, isLoggedIn: false });
           } catch (error) {
-            console.error("Error during Firebase/Google sign out:", error);
+            console.error("[AuthStore] Error during sign out:", error);
             set({ user: null, isLoggedIn: false });
           }
         } else {
-          console.log("Developer Mode Signed Out.");
+          console.log("[AuthStore] No user to log out.");
           set({ user: null, isLoggedIn: false });
         }
       },
@@ -36,10 +35,11 @@ const useAuthStore = create<AuthState>()(
         try {
           await signInWithGoogle();
         } catch (error) {
-          console.error("Error initiating Google Sign-in:", error);
+          console.error("[AuthStore] Error initiating Google Sign-in:", error);
         }
       },
-      setUser: (user) => set({ user: user, isLoggedIn: !!user }),
+      setUser: (user: WebUser | null) =>
+        set({ user: user, isLoggedIn: !!user }),
     }),
     {
       name: "auth-storage",

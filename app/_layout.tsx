@@ -4,8 +4,8 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { StyleSheet, ActivityIndicator, View } from "react-native";
 import useAuthStore from "../hooks/useAuthStore";
-import { getAuth, FirebaseAuthTypes } from "@react-native-firebase/auth";
-import { initializeFirebase, app } from "../utils/firebaseConfig";
+import { getAuth, onAuthStateChanged, User as WebUser } from "firebase/auth";
+import { initializeFirebase, webApp, webAuth } from "../utils/firebaseConfig";
 
 // Initialize Firebase based on the simple toggle in firebaseConfig.ts
 // initializeFirebase();
@@ -24,9 +24,9 @@ export default function RootLayout() {
       try {
         await initializeFirebase();
         setIsFirebaseInitialized(true);
+        console.log("[RootLayout] Firebase initialized successfully.");
       } catch (error) {
         console.error("[RootLayout] Firebase initialization error:", error);
-        // Still set to true to allow app to attempt to continue
         setIsFirebaseInitialized(true);
       }
     };
@@ -36,20 +36,28 @@ export default function RootLayout() {
 
   // Listener to update Zustand store
   useEffect(() => {
-    // Only setup auth listeners after Firebase is initialized
     if (!isFirebaseInitialized) return;
+    console.log("[RootLayout] Setting up Auth listener...");
 
-    const auth = getAuth(app);
-    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
-      // console.log("Auth state changed, user:", firebaseUser?.uid);
-      setUser(firebaseUser);
-      if (!isAuthChecked) {
-        setIsAuthChecked(true);
+    const unsubscribe = onAuthStateChanged(
+      webAuth,
+      (firebaseUser: WebUser | null) => {
+        console.log(
+          "[RootLayout] Auth state changed (Web SDK). User UID:",
+          firebaseUser?.uid ?? "null"
+        );
+        setUser(firebaseUser);
+        if (!isAuthChecked) {
+          setIsAuthChecked(true);
+          console.log("[RootLayout] Initial auth check complete.");
+        }
       }
-    });
+    );
 
-    // Cleanup subscription on unmount
-    return unsubscribe;
+    return () => {
+      console.log("[RootLayout] Cleaning up Auth listener.");
+      unsubscribe();
+    };
   }, [setUser, isAuthChecked, isFirebaseInitialized]);
 
   // Effect to handle navigation based on auth state and initial check
@@ -57,16 +65,24 @@ export default function RootLayout() {
     if (!isAuthChecked || !isFirebaseInitialized) {
       return;
     }
+    console.log(
+      `[RootLayout] Navigation Effect: isLoggedIn=${isLoggedIn}, isAuthChecked=${isAuthChecked}, isFirebaseInitialized=${isFirebaseInitialized}`
+    );
 
     if (isLoggedIn) {
+      console.log("[RootLayout] User logged in, redirecting to / (index)");
       router.replace("/");
     } else {
+      console.log("[RootLayout] User logged out, redirecting to /login");
       router.replace("/login");
     }
   }, [isLoggedIn, isAuthChecked, isFirebaseInitialized, router]);
 
   // Show loading indicator while checking authentication
   if (!isAuthChecked || !isFirebaseInitialized) {
+    console.log(
+      `[RootLayout] Loading Screen: isAuthChecked=${isAuthChecked}, isFirebaseInitialized=${isFirebaseInitialized}`
+    );
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#0000ff" />
@@ -74,6 +90,7 @@ export default function RootLayout() {
     );
   }
 
+  console.log("[RootLayout] Rendering main Stack navigator.");
   return (
     <GestureHandlerRootView style={styles.container}>
       <Stack screenOptions={{ headerShown: false, animation: "fade" }}>

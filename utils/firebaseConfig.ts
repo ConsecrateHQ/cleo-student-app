@@ -20,26 +20,14 @@ import {
   getAuth as getWebAuth,
   connectAuthEmulator as connectWebAuthEmulator,
   Auth as WebAuth,
+  initializeAuth,
+  // getReactNativePersistence, // Keep commented or remove if causing issues elsewhere
+  // We will access it via type assertion
 } from "firebase/auth";
-
-// React Native Firebase imports
-// import {
-//   getFirestore as getRNFirestore,
-//   connectFirestoreEmulator as connectRNFirestoreEmulator,
-//   FirebaseFirestoreTypes,
-//   collection as rnCollection,
-//   doc as rnDoc,
-//   setDoc as rnSetDoc,
-//   getDoc as rnGetDoc,
-//   deleteDoc as rnDeleteDoc,
-// } from "@react-native-firebase/firestore";
-// import {
-//   getAuth as getRNAuth,
-//   connectAuthEmulator as connectRNAuthEmulator,
-//   FirebaseAuthTypes,
-// } from "@react-native-firebase/auth";
-// Use the default export for the app instance and type
-// import rnFirebaseApp from "@react-native-firebase/app";
+// Import the auth module itself to access members via assertion
+import * as fbAuth from "firebase/auth";
+// Import AsyncStorage AS ReactNativeAsyncStorage
+import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
 
 // Firebase Web SDK configuration - Export this
 export const firebaseConfig = {
@@ -96,10 +84,38 @@ export const initializeFirebase = async () => {
     `[FirebaseConfig] initializeFirebase called. Using emulator: ${useEmulator}`
   );
 
-  // Initialize exported variables to cloud versions first
+  // Initialize Firestore first (order doesn't strictly matter but good practice)
   webDb = getFirestore(webApp);
+
+  // Initialize Web Auth WITH specific React Native persistence
+  try {
+    console.log(
+      "[FirebaseConfig] Initializing Web Auth with getReactNativePersistence (using type assertion)..."
+    );
+    // Use type assertion to access getReactNativePersistence despite incorrect types
+    const persistence = (fbAuth as any).getReactNativePersistence(
+      ReactNativeAsyncStorage
+    );
+    webAuth = initializeAuth(webApp, {
+      persistence: persistence,
+    });
+    console.log(
+      "[FirebaseConfig] ✅ Web Auth initialized with getReactNativePersistence."
+    );
+  } catch (error) {
+    console.error(
+      "[FirebaseConfig] ❌ Error initializing Web Auth with getReactNativePersistence:",
+      error
+    );
+    // Fallback to in-memory persistence if initialization fails?
+    // Or re-throw/handle more gracefully?
+    // For now, let's log the error and proceed (Auth might not persist).
+    // If this happens, subsequent emulator connection might fail.
+    // Consider just using getWebAuth as a fallback if needed:
+    // webAuth = getWebAuth(webApp);
+  }
+
   // rnDb = getRNFirestore(rnApp);
-  webAuth = getWebAuth(webApp);
   // rnAuth = getRNAuth(rnApp);
 
   if (useEmulator) {
@@ -109,7 +125,7 @@ export const initializeFirebase = async () => {
 
     console.log(`[FirebaseConfig] 🔥 Using Firebase emulators. Host: ${host}`);
 
-    // ALWAYS Use Web SDK emulator setup
+    // Connect Firestore Emulator
     try {
       console.log(
         `[FirebaseConfig]   -> Connecting Web Firestore instance to emulator at ${host}:${firestorePort}...`
@@ -125,23 +141,31 @@ export const initializeFirebase = async () => {
       );
     }
 
-    try {
-      console.log(
-        `[FirebaseConfig]   -> Connecting Web Auth instance to emulator at http://${host}:${authPort}...`
-      );
-      connectWebAuthEmulator(webAuth, `http://${host}:${authPort}`);
-      console.log(
-        "[FirebaseConfig]   ✅ Web Auth instance configured for emulator."
-      );
-    } catch (e) {
-      console.error(
-        "[FirebaseConfig]   ❌ Error configuring Auth emulator (Web SDK):",
-        e
+    // Connect Auth Emulator (Ensure webAuth was successfully initialized first)
+    if (webAuth) {
+      try {
+        console.log(
+          `[FirebaseConfig]   -> Connecting Web Auth instance to emulator at http://${host}:${authPort}...`
+        );
+        // Use the initialized webAuth instance
+        connectWebAuthEmulator(webAuth, `http://${host}:${authPort}`);
+        console.log(
+          "[FirebaseConfig]   ✅ Web Auth instance configured for emulator."
+        );
+      } catch (e) {
+        console.error(
+          "[FirebaseConfig]   ❌ Error configuring Auth emulator (Web SDK):",
+          e
+        );
+      }
+    } else {
+      console.warn(
+        "[FirebaseConfig] Skipping Auth emulator connection as webAuth failed to initialize."
       );
     }
   } else {
     console.log(
-      "[FirebaseConfig] 🌐 Using production Firebase (cloud instance) for default exports."
+      "[FirebaseConfig] 🌐 Using production Firebase (cloud instance). Persistence already configured."
     );
 
     // Optional: Perform a connection test to the CLOUD using the configured instances
