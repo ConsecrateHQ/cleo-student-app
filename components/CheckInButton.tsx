@@ -468,7 +468,7 @@ const CheckInButton: React.FC<CheckInButtonProps> = ({
 const styles = StyleSheet.create({
   centerCircleContainer: {
     position: "absolute",
-    top: "35%", // shift upward, adjust as needed
+    top: "30%", // shift upward, adjust as needed
     left: 0,
     right: 0,
     alignItems: "center",

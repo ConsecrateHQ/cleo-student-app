@@ -20,6 +20,7 @@ interface UseCheckInResult {
   handleCheckInPress: () => Promise<void>;
   handleCancelPress: () => void;
   resetCancellationState: () => void;
+  clearPendingResult: () => void;
 }
 
 export const useCheckIn = (): UseCheckInResult => {
@@ -82,6 +83,13 @@ export const useCheckIn = (): UseCheckInResult => {
       setPendingCheckResult(null);
     }
   }, [isCheckInCancelled]);
+
+  // Function to explicitly clear pending result states
+  const clearPendingResult = useCallback(() => {
+    console.log("[useCheckIn] Clearing pending check result states explicitly");
+    setPendingCheckResult(null);
+    pendingResultRef.current = null;
+  }, []); // Dependencies: none, it just uses setters/refs
 
   // Handle setting check result with proper sequencing
   const setCheckResult = useCallback(
@@ -318,5 +326,6 @@ export const useCheckIn = (): UseCheckInResult => {
     handleCheckInPress,
     handleCancelPress,
     resetCancellationState,
+    clearPendingResult,
   };
 };

@@ -15,7 +15,8 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app uses your location to verify attendance in class.",
         "NSLocationAlwaysUsageDescription": "This app uses your location to verify attendance in class, even when the app is in the background.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to verify attendance in class, both while using the app and in the background."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location to verify attendance in class, both while using the app and in the background.",
+        "NSFaceIDUsageDescription": "Allow this app to use Face ID for session verification."
       }
     },
     "android": {
@@ -29,7 +30,9 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.ACCESS_BACKGROUND_LOCATION"
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -58,7 +61,20 @@
         }
       ],
       "@react-native-firebase/app",
-      "@react-native-firebase/auth"
+      "@react-native-firebase/auth",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#ffffff"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow this app to use Face ID for session verification."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

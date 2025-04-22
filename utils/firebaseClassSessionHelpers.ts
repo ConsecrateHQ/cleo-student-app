@@ -715,3 +715,58 @@ export async function getSessionStatus(
     throw error;
   }
 }
+
+/**
+ * Updates the biometric verification status for a student's attendance record.
+ *
+ * @param sessionId The ID of the session.
+ * @param studentId The ID of the student.
+ * @param status The new status to set (e.g., 'verified', 'failed_biometric').
+ */
+export async function updateBiometricVerificationStatus(
+  sessionId: string,
+  studentId: string,
+  status: "verified" | "failed_biometric" | "failed_other" // Define allowed statuses
+): Promise<void> {
+  if (!sessionId || !studentId || !status) {
+    console.error("[updateBiometricVerificationStatus] Missing parameters.");
+    throw new Error("Missing parameters for updating verification status.");
+  }
+
+  console.log(
+    `[updateBiometricVerificationStatus] Updating status for student ${studentId} in session ${sessionId} to: ${status}`
+  );
+
+  const attendanceRef = doc(
+    webDb,
+    "sessions",
+    sessionId,
+    "attendance",
+    studentId
+  );
+
+  try {
+    await updateDoc(attendanceRef, {
+      status: status,
+      lastUpdated: serverTimestamp(), // Update timestamp
+      // Optionally add a specific field like isBiometricVerified: status === 'verified'
+    });
+    console.log(
+      `[updateBiometricVerificationStatus] Successfully updated status for student ${studentId} to ${status}.`
+    );
+  } catch (error) {
+    console.error(
+      `[updateBiometricVerificationStatus] Failed to update status for student ${studentId} in session ${sessionId}:`,
+      error
+    );
+    // Check if the error is because the document doesn't exist (e.g., student never checked in)
+    if ((error as FirestoreError).code === "not-found") {
+      console.warn(
+        `[updateBiometricVerificationStatus] Attendance record for student ${studentId} in session ${sessionId} not found. Cannot update status.`
+      );
+      // Decide if this should throw or just return
+      return; // Or throw new Error("Attendance record not found");
+    }
+    throw error; // Re-throw other errors
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Alert } from "react-native";
 import {
   useSharedValue,
@@ -18,7 +18,6 @@ interface ActiveSessionState {
   className: string;
   sessionId: string;
   timer: number;
-  timerInterval: NodeJS.Timeout | null;
 }
 
 interface ActiveSessionAnimations {
@@ -55,8 +54,10 @@ export const useActiveSession = (): UseActiveSessionResult => {
     className: "",
     sessionId: "",
     timer: 0,
-    timerInterval: null,
   });
+
+  // Ref to store the timer interval ID
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Animation values for active session display
   const classNameOpacity = useSharedValue(0);
@@ -84,41 +85,52 @@ export const useActiveSession = (): UseActiveSessionResult => {
 
   // Timer update effect
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-
-    if (activeSession.isActive && !activeSession.timerInterval) {
-      // Update timer every 60 seconds (1 minute) since our timer displays in minutes
-      interval = setInterval(() => {
-        setActiveSession((prev) => ({
-          ...prev,
-          timer: prev.timer + 1,
-        }));
-      }, 60000);
-
-      // Update state with the interval in a single call
-      setActiveSession((prev) => ({
-        ...prev,
-        timerInterval: interval,
-      }));
+    // Clear any existing interval when isActive or sessionId changes
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
 
-    return () => {
-      if (interval) {
-        clearInterval(interval);
-      } else if (activeSession.timerInterval) {
-        clearInterval(activeSession.timerInterval);
-      }
-    };
-  }, [activeSession.isActive, activeSession.timerInterval]);
+    // Start a new interval if the session is active
+    if (activeSession.isActive && activeSession.sessionId) {
+      console.log(
+        `[useActiveSession] Starting timer interval for session ${activeSession.sessionId}`
+      );
+      // Update timer every 5 seconds (changed from 60 for easier testing)
+      intervalRef.current = setInterval(() => {
+        console.log("[useActiveSession] Timer interval tick");
+        setActiveSession((prev) => {
+          // Ensure we are still active before incrementing
+          if (!prev.isActive) {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            intervalRef.current = null;
+            return prev;
+          }
+          console.log(
+            `[useActiveSession] Incrementing timer from ${prev.timer} to ${
+              prev.timer + 1
+            }`
+          );
+          return {
+            ...prev,
+            timer: prev.timer + 1,
+          };
+        });
+      }, 60000); // 60 seconds for production
+    }
 
-  // Clear timer interval when component unmounts
-  useEffect(() => {
+    // Cleanup function: clear interval on component unmount or when dependencies change
     return () => {
-      if (activeSession.timerInterval) {
-        clearInterval(activeSession.timerInterval);
+      if (intervalRef.current) {
+        console.log(
+          `[useActiveSession] Clearing timer interval ${intervalRef.current}`
+        );
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
-  }, []);
+    // Depend only on isActive and sessionId to restart the timer when the session changes
+  }, [activeSession.isActive, activeSession.sessionId]);
 
   // Show active session elements
   const showActiveSessionElements = async (
@@ -164,9 +176,13 @@ export const useActiveSession = (): UseActiveSessionResult => {
       // Continue anyway in case of error to avoid blocking the user
     }
 
-    if (activeSession.timerInterval) {
-      console.log("Clearing existing timer interval");
-      clearInterval(activeSession.timerInterval);
+    // Clear existing timer interval using ref before setting state
+    if (intervalRef.current) {
+      console.log(
+        "[showActiveSessionElements] Clearing existing timer interval"
+      );
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
 
     console.log("Before setting activeSession state:", activeSession);
@@ -189,7 +205,6 @@ export const useActiveSession = (): UseActiveSessionResult => {
         className,
         sessionId,
         timer: initialElapsedMinutes,
-        timerInterval: null,
       });
 
       return {
@@ -197,7 +212,6 @@ export const useActiveSession = (): UseActiveSessionResult => {
         className: className,
         sessionId: sessionId,
         timer: initialElapsedMinutes,
-        timerInterval: null,
       };
     });
 
@@ -265,7 +279,6 @@ export const useActiveSession = (): UseActiveSessionResult => {
       className: "",
       sessionId: "",
       timer: 0,
-      timerInterval: null,
     });
 
     // Then animate out UI elements
@@ -326,10 +339,11 @@ export const useActiveSession = (): UseActiveSessionResult => {
               console.log("User confirmed leaving class early...");
               const sessionId = activeSession.sessionId; // Store for logging
 
-              // Clear timer interval first to stop counting
-              if (activeSession.timerInterval) {
-                console.log("Clearing timer interval");
-                clearInterval(activeSession.timerInterval);
+              // Clear timer interval first using ref
+              if (intervalRef.current) {
+                console.log("Clearing timer interval via ref");
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
               }
 
               // First animate elements out
@@ -366,7 +380,6 @@ export const useActiveSession = (): UseActiveSessionResult => {
                 className: "",
                 sessionId: "",
                 timer: 0,
-                timerInterval: null,
               });
 
               // Try to check out from the session after animations start
