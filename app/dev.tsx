@@ -269,17 +269,20 @@ export default function DevScreen() {
         const userClassDocWeb = await webGetDoc(userClassRefWeb);
         updatedClasses.CS101.userIsEnrolled = userClassDocWeb.exists();
 
-        // Check for active session
-        // Note: Session structure might differ between SDK usages
+        // Check for active session - query the sessions collection
         const activeSessionQuery = webQuery(
-          webCollection(webDb, "classes", cs101Doc.id, "sessions"),
-          webWhere("isActive", "==", true), // Assuming 'isActive' field exists
+          webCollection(webDb, "sessions"),
+          webWhere("classId", "==", cs101Doc.id),
+          webWhere("status", "==", "active"),
           webLimit(1)
         );
         const activeSessionSnapshot = await webGetDocs(activeSessionQuery);
 
         if (!activeSessionSnapshot.empty) {
           updatedClasses.CS101.sessionId = activeSessionSnapshot.docs[0].id;
+          console.log(
+            `Found active session for CS101: ${updatedClasses.CS101.sessionId}`
+          );
         } else {
           updatedClasses.CS101.sessionId = "";
         }
@@ -298,16 +301,20 @@ export default function DevScreen() {
         const userClassDocWebGerman = await webGetDoc(userClassRefWebGerman);
         updatedClasses.GermanA2.userIsEnrolled = userClassDocWebGerman.exists();
 
-        // Check for active session
+        // Check for active session - query the sessions collection
         const activeSessionQuery = webQuery(
-          webCollection(webDb, "classes", germanDoc.id, "sessions"),
-          webWhere("isActive", "==", true),
+          webCollection(webDb, "sessions"),
+          webWhere("classId", "==", germanDoc.id),
+          webWhere("status", "==", "active"),
           webLimit(1)
         );
         const activeSessionSnapshot = await webGetDocs(activeSessionQuery);
 
         if (!activeSessionSnapshot.empty) {
           updatedClasses.GermanA2.sessionId = activeSessionSnapshot.docs[0].id;
+          console.log(
+            `Found active session for German A2: ${updatedClasses.GermanA2.sessionId}`
+          );
         } else {
           updatedClasses.GermanA2.sessionId = "";
         }
@@ -421,69 +428,52 @@ export default function DevScreen() {
         return;
       }
 
-      // Get current geolocation
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            // Add new session document - ALWAYS use Web SDK
-            const sessionsCollectionRef = webCollection(
-              webDb,
-              "classes",
-              classInfo.id,
-              "sessions"
-            );
+      // Use hardcoded locations for simplicity and to avoid navigator issues
+      try {
+        // Use different coordinates based on class
+        const location =
+          classKey === "CS101"
+            ? new webGeoPoint(34.0522, -118.2437) // Los Angeles
+            : new webGeoPoint(52.52, 13.405); // Berlin
 
-            const sessionData = {
-              createdBy: user?.uid,
-              createdAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
-              isActive: true,
-              location: new webGeoPoint(
-                position.coords.latitude,
-                position.coords.longitude
-              ),
-              radiusMeters: 100, // Default radius
-            };
+        // Add new session document - ALWAYS use Web SDK
+        const sessionsCollectionRef = webCollection(webDb, "sessions");
 
-            const newSessionRef = await webAddDoc(
-              sessionsCollectionRef,
-              sessionData
-            );
+        const sessionData = {
+          classId: classInfo.id,
+          teacherId: user?.uid,
+          startTime: webServerTimestamp(),
+          endTime: null,
+          status: "active",
+          location: location,
+          radius: 100, // Default radius in meters
+          created_at: webServerTimestamp(),
+        };
 
-            Alert.alert(
-              "Success",
-              `New session started for ${classInfo.name}!\nSession ID: ${newSessionRef.id}`
-            );
+        const newSessionRef = await webAddDoc(
+          sessionsCollectionRef,
+          sessionData
+        );
 
-            // Refresh class data
-            fetchClassData();
-          } catch (err) {
-            Alert.alert(
-              "Error",
-              `Failed to create session: ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          } finally {
-            const loadingKey =
-              classKey === "CS101" ? "startCS101" : "startGermanA2";
-            setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
-          }
-        },
-        (error) => {
-          Alert.alert(
-            "Location Error",
-            `Failed to get location: ${error.message}`
-          );
-          const loadingKey =
-            classKey === "CS101" ? "startCS101" : "startGermanA2";
-          setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 10000,
-        }
-      );
+        Alert.alert(
+          "Success",
+          `New session started for ${classInfo.name}!\nSession ID: ${newSessionRef.id}`
+        );
+
+        // Refresh class data
+        fetchClassData();
+      } catch (err) {
+        Alert.alert(
+          "Error",
+          `Failed to create session: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      } finally {
+        const loadingKey =
+          classKey === "CS101" ? "startCS101" : "startGermanA2";
+        setIsLoading((prev) => ({ ...prev, [loadingKey]: false }));
+      }
     } catch (err) {
       Alert.alert(
         "Error",
@@ -507,19 +497,12 @@ export default function DevScreen() {
         return;
       }
 
-      // Update the session document
-      const sessionRef = webDoc(
-        webDb,
-        "classes",
-        classInfo.id,
-        "sessions",
-        classInfo.sessionId
-      );
+      // Update the session document using the sessions collection
+      const sessionRef = webDoc(webDb, "sessions", classInfo.sessionId);
 
       const updateData = {
-        isActive: false,
-        endedAt: webServerTimestamp(), // ALWAYS use Web SDK timestamp
-        endedBy: user?.uid,
+        status: "ended",
+        endTime: webServerTimestamp(),
       };
 
       await webUpdateDoc(sessionRef, updateData);

@@ -15,7 +15,9 @@ import theme from "../theme";
 interface ActiveSessionDisplayProps {
   isVisible: boolean;
   className: string;
-  timerValue: number;
+  timerValue: number; // minutes
+  seconds: number;
+  hours: number; // Add hours parameter
   onLeavePress: () => void;
   classNameContainerStyle: StyleProp<ViewStyle>;
   timerContainerStyle: StyleProp<ViewStyle>;
@@ -29,14 +31,20 @@ interface ActiveSessionDisplayProps {
   >;
 }
 
-const formatTimer = (minutes: number) => {
-  return `${minutes}`;
+// Update formatTimer to include hours
+const formatTimer = (hours: number, minutes: number, seconds: number) => {
+  const formattedHours = hours < 10 ? `0${hours}` : `${hours}`;
+  const formattedMinutes = minutes < 10 ? `0${minutes}` : `${minutes}`;
+  const formattedSeconds = seconds < 10 ? `0${seconds}` : `${seconds}`;
+  return `${formattedHours}:${formattedMinutes}:${formattedSeconds}`;
 };
 
 const ActiveSessionDisplay: React.FC<ActiveSessionDisplayProps> = ({
   isVisible,
   className,
   timerValue,
+  seconds,
+  hours,
   onLeavePress,
   classNameContainerStyle,
   timerContainerStyle,
@@ -71,8 +79,7 @@ const ActiveSessionDisplay: React.FC<ActiveSessionDisplayProps> = ({
         ]}
       >
         <Text style={styles.sessionDurationText}>
-          {formatTimer(timerValue)}{" "}
-          <Text style={styles.sessionDurationMin}>min</Text>
+          {formatTimer(hours, timerValue, seconds)}
         </Text>
       </Animated.View>
 
@@ -117,7 +124,7 @@ const styles = StyleSheet.create({
   },
   sessionDurationText: {
     color: "#fff",
-    fontSize: 36,
+    fontSize: 30,
     fontWeight: "bold",
     letterSpacing: 0.5,
   },

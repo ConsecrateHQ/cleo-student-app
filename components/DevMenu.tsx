@@ -280,13 +280,14 @@ Collection: ${testCollectionName}`
       for (const key of ["CS101", "GermanA2"]) {
         const className =
           key === "CS101" ? "Computer Science 101" : "German A2";
+        const joinCode = key === "CS101" ? "CS101" : "GER102";
 
         // ALWAYS use Web SDK implementation
         // Find class
         const classesRef = webCollection(webDb, "classes");
         const classQuery = webQuery(
           classesRef,
-          webWhere("name", "==", className),
+          webWhere("joinCode", "==", joinCode),
           webLimit(1)
         );
         const classSnap = await webGetDocs(classQuery);
@@ -309,7 +310,7 @@ Collection: ${testCollectionName}`
           const studentSnap = await webGetDoc(studentRef);
           userIsEnrolled = studentSnap.exists();
 
-          // Check for active sessions
+          // Check for active sessions - query directly from /sessions collection
           const sessionsRef = webCollection(webDb, "sessions");
           const sessionQuery = webQuery(
             sessionsRef,
@@ -321,6 +322,7 @@ Collection: ${testCollectionName}`
 
           if (!sessionSnap.empty) {
             sessionId = sessionSnap.docs[0].id;
+            console.log(`Found active session for ${className}: ${sessionId}`);
           }
         }
 
@@ -462,7 +464,7 @@ Collection: ${testCollectionName}`
         `Deactivating session: ${classInfo.sessionId} for ${classInfo.name}...`
       );
 
-      // ALWAYS Use Web SDK implementation
+      // ALWAYS Use Web SDK implementation - query sessions collection directly
       const sessionRefWeb = webDoc(webDb, "sessions", classInfo.sessionId);
       await webUpdateDoc(sessionRefWeb, {
         status: "ended",
@@ -523,7 +525,7 @@ Collection: ${testCollectionName}`
       );
 
       // ALWAYS Use Web SDK implementation
-      // Use different locations for each class
+      // Use different locations for each class - don't rely on device location
       const location =
         classKey === "CS101"
           ? new webGeoPoint(34.0522, -118.2437) // Los Angeles

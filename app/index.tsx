@@ -31,7 +31,7 @@ import {
   getActiveSessionsForStudent,
   checkInToSession,
 } from "../utils/firebaseClassSessionHelpers";
-import { Timestamp } from "firebase/firestore";
+import { Timestamp, GeoPoint } from "firebase/firestore";
 import * as Notifications from "expo-notifications";
 import * as LocalAuthentication from "expo-local-authentication";
 import { updateBiometricVerificationStatus } from "../utils/firebaseClassSessionHelpers";
@@ -41,6 +41,7 @@ import { checkOutFromSession } from "../utils/firebaseClassSessionHelpers";
 import { useLocation } from "../hooks/useLocation";
 import { validateLocationForSession } from "../utils/locationHelpers";
 import { SessionCheckResult } from "../hooks/useClassSessionChecker";
+import { useLocationMonitoring } from "@/hooks/useLocationMonitoring";
 
 // --- Notification Handler Configuration ---
 Notifications.setNotificationHandler({
@@ -71,6 +72,29 @@ const App = () => {
   const [biometricNotificationId, setBiometricNotificationId] = useState<
     string | null
   >(null);
+
+  // Replace all location check state with a single hook
+  const { initLocationCheck, clearLocationCheck } = useLocationMonitoring({
+    onOutOfBounds: () => {
+      console.log("[App] Received out-of-bounds notification");
+    },
+    onReturnedInBounds: () => {
+      console.log("[App] Received returned-to-bounds notification");
+    },
+    onAutoCheckout: async (sessionId: string) => {
+      console.log(`[App] Auto-checkout triggered for session ${sessionId}`);
+      // Reset local UI state
+      setActiveSessionLocally({
+        isActive: false,
+        className: "",
+        sessionId: "",
+        timer: 0,
+        seconds: 0,
+        hours: 0,
+      });
+      setActiveSessionInStore(null);
+    },
+  });
 
   // Custom hooks
   const { location } = useLocation();
@@ -337,15 +361,53 @@ const App = () => {
     }
   }, [biometricNotificationId]);
 
+  // Effect to set up location monitoring when session becomes active
+  useEffect(() => {
+    let startedMonitoring = false; // Flag to track if this effect instance started monitoring
+
+    if (activeSession.isActive && user?.uid && activeSessionInfo?.sessionId) {
+      console.log(
+        "[App Index] Effect triggered: Starting location monitoring setup."
+      );
+      const sessionId = activeSessionInfo.sessionId;
+      console.log(
+        `[App] Starting location monitoring for session ${sessionId}`
+      );
+      initLocationCheck(sessionId, user.uid);
+      startedMonitoring = true; // Mark that monitoring was initiated
+    }
+
+    // Cleanup function - will be called when dependencies change or component unmounts
+    return () => {
+      // Only clear if this specific effect instance actually started the monitoring
+      if (startedMonitoring) {
+        console.log(
+          "[App] Cleaning up location monitoring initiated by this effect instance."
+        );
+        clearLocationCheck();
+      }
+    };
+  }, [
+    // Only re-run this effect when these specific properties change, not on every render
+    activeSession.isActive,
+    activeSessionInfo?.sessionId,
+    user?.uid,
+    // These functions should be stable across renders
+    initLocationCheck,
+    clearLocationCheck,
+  ]);
+
   // Wrap handleLeaveEarlyPress to clear store state and cancel notification
   const handleLeaveEarlyPress = useCallback(async () => {
     await cancelBiometricNotification(); // Cancel notification first
+    clearLocationCheck(); // Stop location monitoring
     await originalHandleLeaveEarlyPress();
     setActiveSessionInStore(null);
   }, [
     originalHandleLeaveEarlyPress,
     setActiveSessionInStore,
     cancelBiometricNotification,
+    clearLocationCheck,
   ]);
 
   // Effect to reset cancellation state when leaving a session
@@ -866,15 +928,14 @@ const App = () => {
 
   // Inside the App component, add a new handler function:
   const handleSessionEndComplete = useCallback(async () => {
-    // Make async
     // First hide the congratulations drawer
     hideCongratulations();
 
-    // Cancel any pending biometric notification
+    // Cancel any pending biometric notification and location checks
     await cancelBiometricNotification();
+    clearLocationCheck();
 
-    // Then reset the session state - but skip the confirmation dialog
-    // since the session has already ended
+    // Then reset the session state
     if (activeSession.isActive && activeSession.sessionId) {
       console.log("Ending completed session and resetting state");
 
@@ -892,6 +953,8 @@ const App = () => {
         className: "",
         sessionId: "",
         timer: 0,
+        seconds: 0,
+        hours: 0,
       });
 
       // Reset other important state references
@@ -911,15 +974,17 @@ const App = () => {
     resetCancellationState,
     setActiveSessionInStore,
     cancelBiometricNotification,
+    clearLocationCheck,
   ]);
 
   // Effect for component unmount cleanup
   useEffect(() => {
     // Cleanup function to cancel notification on unmount
     return () => {
-      cancelBiometricNotification(); // Use the cancel function
+      cancelBiometricNotification();
+      clearLocationCheck();
     };
-  }, [cancelBiometricNotification]); // Depend on the cancel function
+  }, [cancelBiometricNotification, clearLocationCheck]);
 
   // Effect to handle app state changes (foreground, background, inactive)
   useEffect(() => {
@@ -1028,6 +1093,8 @@ const App = () => {
           isVisible={activeSession.isActive}
           className={activeSession.className}
           timerValue={activeSession.timer}
+          seconds={activeSession.seconds}
+          hours={activeSession.hours}
           onLeavePress={handleLeaveEarlyPress}
           animatedClassNameStyle={sessionAnimations.animatedClassNameStyle}
           animatedTimerStyle={sessionAnimations.animatedTimerStyle}

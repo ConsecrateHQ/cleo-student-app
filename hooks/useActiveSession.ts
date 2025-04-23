@@ -19,7 +19,9 @@ interface ActiveSessionState {
   isActive: boolean;
   className: string;
   sessionId: string;
-  timer: number;
+  timer: number; // This is now minutes
+  seconds: number;
+  hours: number; // Add hours field
 }
 
 interface ActiveSessionAnimations {
@@ -56,6 +58,8 @@ export const useActiveSession = (): UseActiveSessionResult => {
     className: "",
     sessionId: "",
     timer: 0,
+    seconds: 0,
+    hours: 0, // Initialize hours field
   });
 
   // Ref to store the timer interval ID
@@ -98,7 +102,7 @@ export const useActiveSession = (): UseActiveSessionResult => {
       console.log(
         `[useActiveSession] Starting timer interval for session ${activeSession.sessionId}`
       );
-      // Update timer every 5 seconds (changed from 60 for easier testing)
+      // Update timer every second for more granular time tracking
       intervalRef.current = setInterval(() => {
         console.log("[useActiveSession] Timer interval tick");
         setActiveSession((prev) => {
@@ -108,17 +112,22 @@ export const useActiveSession = (): UseActiveSessionResult => {
             intervalRef.current = null;
             return prev;
           }
-          console.log(
-            `[useActiveSession] Incrementing timer from ${prev.timer} to ${
-              prev.timer + 1
-            }`
-          );
+
+          // Calculate new seconds, minutes, and hours
+          const newSeconds = prev.seconds + 1;
+          const totalMinutes = prev.timer + Math.floor(newSeconds / 60);
+          const remainingSeconds = newSeconds % 60;
+          const newHours = prev.hours + Math.floor(totalMinutes / 60);
+          const remainingMinutes = totalMinutes % 60;
+
           return {
             ...prev,
-            timer: prev.timer + 1,
+            timer: remainingMinutes,
+            seconds: remainingSeconds,
+            hours: newHours,
           };
         });
-      }, 60000); // 60 seconds for production
+      }, 1000); // Update every second
     }
 
     // Cleanup function: clear interval on component unmount or when dependencies change
@@ -260,23 +269,28 @@ export const useActiveSession = (): UseActiveSessionResult => {
         return prevState;
       }
 
-      // Convert seconds to minutes for the timer display (rounds down to integer minutes)
-      const initialElapsedMinutes = initialElapsedSeconds
-        ? Math.floor(initialElapsedSeconds / 60)
-        : 0;
+      // Calculate hours, minutes and remaining seconds
+      const initialTotalMinutes = Math.floor(initialElapsedSeconds / 60);
+      const initialHours = Math.floor(initialTotalMinutes / 60);
+      const initialMinutes = initialTotalMinutes % 60;
+      const initialRemainingSeconds = initialElapsedSeconds % 60;
 
       console.log("Updating active session state to:", {
         isActive: true,
         className,
         sessionId,
-        timer: initialElapsedMinutes,
+        timer: initialMinutes,
+        seconds: initialRemainingSeconds,
+        hours: initialHours,
       });
 
       return {
         isActive: true,
         className: className,
         sessionId: sessionId,
-        timer: initialElapsedMinutes,
+        timer: initialMinutes,
+        seconds: initialRemainingSeconds,
+        hours: initialHours,
       };
     });
 
@@ -344,6 +358,8 @@ export const useActiveSession = (): UseActiveSessionResult => {
       className: "",
       sessionId: "",
       timer: 0,
+      seconds: 0,
+      hours: 0,
     });
 
     // Then animate out UI elements
@@ -404,9 +420,13 @@ export const useActiveSession = (): UseActiveSessionResult => {
               console.log("User confirmed leaving class early...");
               const sessionId = activeSession.sessionId; // Store for logging
 
-              // Get current accumulated time from active session in minutes
+              // Get current accumulated time from active session in hours, minutes and seconds
+              const currentHours = activeSession.hours;
               const currentMinutes = activeSession.timer;
-              const currentSeconds = currentMinutes * 60;
+              const currentSeconds =
+                currentHours * 3600 +
+                currentMinutes * 60 +
+                activeSession.seconds;
 
               // Get any previous duration from store
               const activeSessionInfo =
@@ -417,7 +437,7 @@ export const useActiveSession = (): UseActiveSessionResult => {
               const totalDuration = previousDuration + currentSeconds;
 
               console.log(
-                `Current session time: ${currentMinutes} minutes (${currentSeconds} seconds)`
+                `Current session time: ${currentHours} hours ${currentMinutes} minutes ${activeSession.seconds} seconds (${currentSeconds} total seconds)`
               );
               console.log(
                 `Previous stored duration: ${previousDuration} seconds`
@@ -467,6 +487,8 @@ export const useActiveSession = (): UseActiveSessionResult => {
                 className: "",
                 sessionId: "",
                 timer: 0,
+                seconds: 0,
+                hours: 0,
               });
 
               // Try to check out from the session after animations start
