@@ -76,7 +76,11 @@ const CustomMenu: React.FC<CustomMenuProps> = ({ trigger, items }) => {
 
   return (
     <>
-      <TouchableOpacity ref={triggerRef} onPress={showMenu}>
+      <TouchableOpacity
+        ref={triggerRef}
+        onPress={showMenu}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
         {trigger}
       </TouchableOpacity>
 

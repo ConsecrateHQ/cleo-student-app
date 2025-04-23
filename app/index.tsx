@@ -698,6 +698,23 @@ const App = () => {
           animatedTextStyle={animatedTextStyle}
           animatedNewTextStyle={animatedNewTextStyle}
           animatedCircleStyle={animatedCircleStyle}
+          onJoinClass={async (code: string) => {
+            // Implement joining a class with the provided code
+            try {
+              // This function would typically call a Firebase function
+              console.log(`Joining class with code: ${code}`);
+
+              // Example implementation:
+              // const result = await joinClassWithCode(user?.uid || '', code);
+              // return result;
+
+              // For now, just return a resolved promise
+              return Promise.resolve();
+            } catch (error) {
+              console.error("Error joining class:", error);
+              throw error;
+            }
+          }}
         />
 
         {/* Bottom Sheet */}

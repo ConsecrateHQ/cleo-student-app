@@ -36,11 +36,8 @@ const LogoutButton = () => {
 const styles = StyleSheet.create({
   button: {
     backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: theme.colors.divider,
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
     alignSelf: "center",
     marginVertical: 20,
   },
@@ -48,6 +45,7 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
     fontWeight: "500",
     fontSize: 16,
+    opacity: 0.7,
   },
 });
 

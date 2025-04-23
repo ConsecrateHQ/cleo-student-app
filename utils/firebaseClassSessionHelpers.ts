@@ -770,3 +770,195 @@ export async function updateBiometricVerificationStatus(
     throw error; // Re-throw other errors
   }
 }
+
+/**
+ * Archives a class for a student.
+ * Moves it from /userClasses/{studentId}/classes/{classId} to
+ * /userClasses/{studentId}/archivedClasses/{classId}.
+ *
+ * @param studentId The ID of the student.
+ * @param classId The ID of the class to archive.
+ * @throws If an error occurs during archiving.
+ */
+export async function archiveClass(
+  studentId: string,
+  classId: string
+): Promise<void> {
+  if (!studentId || !classId) {
+    console.error("Student ID and Class ID are required.");
+    throw new Error("Student ID and Class ID are required.");
+  }
+
+  console.log(`Student ${studentId} attempting to archive class ${classId}`);
+
+  try {
+    const userClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/classes/${classId}`
+    );
+    const archivedClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/archivedClasses/${classId}`
+    );
+
+    const docSnap = await getDoc(userClassDocRef);
+    if (!docSnap.exists()) {
+      console.warn(
+        `Student ${studentId} is not enrolled in class ${classId}, cannot archive.`
+      );
+      return;
+    }
+
+    const classData = docSnap.data();
+    const batch = writeBatch(webDb);
+
+    // Add to archived collection
+    batch.set(archivedClassDocRef, {
+      ...classData,
+      archivedDate: serverTimestamp(),
+    });
+
+    // Remove from active classes
+    batch.delete(userClassDocRef);
+
+    await batch.commit();
+    console.log(
+      `Successfully archived class ${classId} for student ${studentId}`
+    );
+  } catch (error) {
+    console.error("Error archiving class:", error);
+    throw error;
+  }
+}
+
+/**
+ * Unarchives a class for a student.
+ * Moves it from /userClasses/{studentId}/archivedClasses/{classId} back to
+ * /userClasses/{studentId}/classes/{classId}.
+ *
+ * @param studentId The ID of the student.
+ * @param classId The ID of the class to unarchive.
+ * @throws If an error occurs during unarchiving.
+ */
+export async function unarchiveClass(
+  studentId: string,
+  classId: string
+): Promise<void> {
+  if (!studentId || !classId) {
+    console.error("Student ID and Class ID are required.");
+    throw new Error("Student ID and Class ID are required.");
+  }
+
+  console.log(`Student ${studentId} attempting to unarchive class ${classId}`);
+
+  try {
+    const archivedClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/archivedClasses/${classId}`
+    );
+    const userClassDocRef = doc(
+      webDb,
+      `userClasses/${studentId}/classes/${classId}`
+    );
+
+    const docSnap = await getDoc(archivedClassDocRef);
+    if (!docSnap.exists()) {
+      console.warn(
+        `Student ${studentId} does not have class ${classId} archived, cannot unarchive.`
+      );
+      return;
+    }
+
+    const classData = docSnap.data();
+    const batch = writeBatch(webDb);
+
+    // Remove archivedDate field
+    const { archivedDate, ...restData } = classData;
+
+    // Move back to active classes
+    batch.set(userClassDocRef, restData);
+
+    // Remove from archived collection
+    batch.delete(archivedClassDocRef);
+
+    await batch.commit();
+    console.log(
+      `Successfully unarchived class ${classId} for student ${studentId}`
+    );
+  } catch (error) {
+    console.error("Error unarchiving class:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches the list of archived classes for a student.
+ *
+ * @param studentId The ID of the student.
+ * @returns A promise resolving to an array of archived class info.
+ */
+export async function getArchivedClassesForStudent(
+  studentId: string
+): Promise<BaseUserClassInfo[]> {
+  if (!studentId) {
+    console.warn("[getArchivedClassesForStudent] No studentId provided.");
+    return [];
+  }
+  try {
+    const archivedClassesRef = collection(
+      webDb,
+      "userClasses",
+      studentId,
+      "archivedClasses"
+    );
+    const snapshot = await getDocs(archivedClassesRef);
+
+    if (snapshot.empty) {
+      return [];
+    }
+
+    const classes: BaseUserClassInfo[] = snapshot.docs.map((docSnapshot) => ({
+      classId: docSnapshot.id,
+      ...(docSnapshot.data() as Omit<BaseUserClassInfo, "classId">),
+    }));
+
+    return classes;
+  } catch (error) {
+    console.error(
+      `[getArchivedClassesForStudent] Error fetching archived classes for student ${studentId}:`,
+      error
+    );
+    throw error;
+  }
+}
+
+/**
+ * Gets the count of archived classes for a student.
+ *
+ * @param studentId The ID of the student.
+ * @returns A promise resolving to the count of archived classes.
+ */
+export async function getArchivedClassesCountForStudent(
+  studentId: string
+): Promise<number> {
+  if (!studentId) {
+    console.warn("[getArchivedClassesCountForStudent] No studentId provided.");
+    return 0;
+  }
+  try {
+    const archivedClassesRef = collection(
+      webDb,
+      "userClasses",
+      studentId,
+      "archivedClasses"
+    );
+    const snapshot = await getDocs(archivedClassesRef);
+    return snapshot.size;
+  } catch (error) {
+    console.error(
+      `[getArchivedClassesCountForStudent] Error fetching archived classes count for student ${studentId}:`,
+      error
+    );
+    return 0;
+  }
+}

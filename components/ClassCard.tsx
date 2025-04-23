@@ -1,7 +1,8 @@
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Entypo } from "@expo/vector-icons";
 import CustomMenu from "./CustomMenu";
+import theme from "../theme";
 
 export interface ClassCardProps {
   name: string;
@@ -26,59 +27,86 @@ export const ClassCard = ({
   return (
     <View style={styles.card}>
       <View style={styles.topRow}>
+        {/* Badge */}
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{NumberAttended}</Text>
         </View>
-        <CustomMenu
-          trigger={<Entypo name="dots-three-vertical" size={16} color="#666" />}
-          items={menuItems}
-        />
+        {/* Menu in top right */}
+        <View style={styles.menuContainer}>
+          <CustomMenu
+            trigger={
+              <Entypo
+                name="dots-three-vertical"
+                size={20}
+                color={theme.colors.text.primary}
+              />
+            }
+            items={menuItems}
+          />
+        </View>
       </View>
-      <Text style={styles.name}>{name}</Text>
-      <Text style={styles.subtitle}>{day}</Text>
+
+      <View style={styles.bottomRow}>
+        {/* Class Name */}
+        <Text style={styles.name} numberOfLines={2} ellipsizeMode="tail">
+          {name}
+        </Text>
+
+        {/* Day of week */}
+        {day && <Text style={styles.subtitle}>{day}</Text>}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#1e1e1e",
+    backgroundColor: "#222226",
+    aspectRatio: 0.9,
+    borderRadius: 26,
     padding: 16,
-    borderRadius: 20,
-    width: "47%",
-    aspectRatio: 1,
     justifyContent: "space-between",
-    margin: "1.5%",
+    borderWidth: 2,
+    borderColor: "#2E2E33",
   },
   topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
+    width: "100%",
+  },
+  menuContainer: {
+    marginTop: 10,
+    zIndex: 10,
   },
   badge: {
-    backgroundColor: "#333",
-    borderRadius: 25,
-    width: 40,
-    height: 40,
+    backgroundColor: "#222226",
+    borderRadius: 35,
+    width: 60,
+    height: 60,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#444",
   },
   badgeText: {
-    color: "#fff",
+    color: "#FFF",
     fontWeight: "bold",
-    fontSize: 18,
+    fontSize: 20,
+  },
+  bottomRow: {
+    alignItems: "flex-start",
   },
   name: {
-    color: "#fff",
+    color: "#FFF",
     fontSize: 20,
     fontWeight: "bold",
-    marginTop: 4,
+    marginBottom: 3,
+    width: "100%",
   },
   subtitle: {
     color: "#999",
-    fontSize: 14,
+    fontSize: 15,
   },
 });
 
