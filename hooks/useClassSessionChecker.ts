@@ -16,6 +16,8 @@ import {
 
 // Import Web SDK types
 import { Timestamp, GeoPoint } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import { webDb } from "../utils/firebaseConfig";
 
 /**
  * Local interfaces to match the structures used in firebaseClassSessionHelpers
@@ -102,6 +104,7 @@ export interface SessionCheckResult {
   sessionId?: string; // Optional session ID when attending a class
   classId?: string; // Add classId here
   cancelled?: boolean; // Add flag for user cancellation
+  isRejoin: boolean;
 }
 
 export const useClassSessionChecker = () => {
@@ -288,6 +291,7 @@ export const useClassSessionChecker = () => {
         success: false,
         message: "User not logged in",
         isAttending: false,
+        isRejoin: false,
       };
     }
 
@@ -312,6 +316,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -327,6 +332,7 @@ export const useClassSessionChecker = () => {
             success: false,
             message: "Check-in cancelled.",
             isAttending: false,
+            isRejoin: false,
             cancelled: true,
           };
         } else {
@@ -344,6 +350,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -362,6 +369,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -379,6 +387,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -416,6 +425,7 @@ export const useClassSessionChecker = () => {
             success: false,
             message: "Check-in cancelled.",
             isAttending: false,
+            isRejoin: false,
             cancelled: true,
           };
         }
@@ -453,6 +463,7 @@ export const useClassSessionChecker = () => {
             success: false,
             message: "Check-in cancelled.",
             isAttending: false,
+            isRejoin: false,
             cancelled: true,
           };
         }
@@ -469,6 +480,7 @@ export const useClassSessionChecker = () => {
           message:
             "Cannot check attendance: Location data not available. Please ensure location services are enabled.",
           isAttending: false,
+          isRejoin: false,
         };
       }
 
@@ -479,6 +491,7 @@ export const useClassSessionChecker = () => {
           message:
             "No active class sessions found. Please wait for your teacher to start a session.",
           isAttending: false,
+          isRejoin: false,
         };
       }
 
@@ -506,6 +519,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -520,6 +534,43 @@ export const useClassSessionChecker = () => {
           (session) => session.classId === attendingClass?.classId
         );
         sessionId = matchingSession?.sessionId || "";
+      }
+
+      // Check if student previously left this session early
+      let isRejoin = false;
+      let previousDuration = 0;
+
+      if (isAttending && sessionId && user?.uid) {
+        try {
+          // Check if there's an attendance record with checkOutTime
+          const attendanceRef = doc(
+            webDb,
+            `sessions/${sessionId}/attendance/${user.uid}`
+          );
+          const attendanceSnap = await getDoc(attendanceRef);
+
+          if (attendanceSnap.exists()) {
+            const attendanceData = attendanceSnap.data();
+            if (
+              attendanceData.checkOutTime !== null &&
+              attendanceData.status === "checked_out"
+            ) {
+              console.log(
+                `Student ${user.uid} is rejoining session ${sessionId}`
+              );
+              isRejoin = true;
+              previousDuration = attendanceData.duration || 0;
+              console.log(
+                `Previous duration: ${previousDuration} seconds (${Math.floor(
+                  previousDuration / 60
+                )} minutes)`
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Error checking previous attendance:", error);
+          // Continue with normal check-in if we can't verify rejoin status
+        }
       }
 
       // Format the message
@@ -542,20 +593,27 @@ export const useClassSessionChecker = () => {
               success: false,
               message: "Check-in cancelled.",
               isAttending: false,
+              isRejoin: false,
               cancelled: true,
             };
           }
 
           console.log(
-            `Attempting to automatically check in student ${user.uid} to session ${sessionId}`
+            `Attempting to ${isRejoin ? "rejoin" : "check in"} student ${
+              user.uid
+            } to session ${sessionId}`
           );
           await checkInToSession(sessionId, user.uid, studentCoords);
           console.log(
-            `Successfully recorded check-in for student ${user.uid} in session ${sessionId}`
+            `Successfully recorded ${
+              isRejoin ? "rejoin" : "check-in"
+            } for student ${user.uid} in session ${sessionId}`
           );
         } catch (checkInError) {
           console.error(
-            `Failed to automatically record check-in for session ${sessionId}:`,
+            `Failed to automatically record ${
+              isRejoin ? "rejoin" : "check-in"
+            } for session ${sessionId}:`,
             checkInError
           );
           // Decide how to handle this error. Maybe return a specific message or status?
@@ -563,10 +621,11 @@ export const useClassSessionChecker = () => {
           // if the check-in failed. Consider adding a specific error state or message.
           return {
             success: false,
-            message: `Attendance detected, but failed to record check-in: ${
-              (checkInError as Error).message
-            }`,
+            message: `Attendance detected, but failed to record ${
+              isRejoin ? "rejoin" : "check-in"
+            }: ${(checkInError as Error).message}`,
             isAttending: false, // Set to false as check-in failed
+            isRejoin: isRejoin, // Add flag to indicate if this is a rejoin
           };
         }
       }
@@ -577,6 +636,7 @@ export const useClassSessionChecker = () => {
         isAttending,
         sessionId: isAttending ? sessionId : undefined, // Only return sessionId if attending
         classId: isAttending ? attendingClass?.classId : undefined, // Return classId if attending
+        isRejoin: isRejoin, // Add flag to indicate if this is a rejoin
       };
     } catch (error) {
       console.error("Error checking sessions:", error);
@@ -586,6 +646,7 @@ export const useClassSessionChecker = () => {
           success: false,
           message: "Check-in cancelled.",
           isAttending: false,
+          isRejoin: false,
           cancelled: true,
         };
       }
@@ -593,6 +654,7 @@ export const useClassSessionChecker = () => {
         success: false,
         message: "Could not check sessions. Please try again.",
         isAttending: false,
+        isRejoin: false,
       };
     } finally {
       // Clear the abort controller reference

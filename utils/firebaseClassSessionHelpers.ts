@@ -70,6 +70,22 @@ interface ActiveSessionData {
 }
 
 /**
+ * Defines the structure for a student's attendance record within a session.
+ * Based on /sessions/{sessionId}/attendance/{studentId}
+ */
+export interface StudentAttendanceRecord {
+  sessionId: string;
+  classId: string;
+  checkInTime: Timestamp | FieldValue | null;
+  checkInLocation: GeoPoint | null;
+  checkOutTime: Timestamp | FieldValue | null;
+  duration: number;
+  status: string;
+  isGpsVerified: boolean;
+  lastUpdated: Timestamp | FieldValue;
+}
+
+/**
  * Sets up a real-time listener for a student's list of classes.
  *
  * @param userId The ID of the student.
@@ -430,20 +446,6 @@ export async function getActiveSessionsForStudent(
 }
 
 /**
- * Defines the structure for a student's attendance record within a session.
- * Based on /sessions/{sessionId}/attendance/{studentId}
- */
-export interface StudentAttendanceRecord {
-  sessionId: string;
-  classId: string;
-  checkInTime: Timestamp | FieldValue | null;
-  checkInLocation: GeoPoint | null;
-  status: string;
-  isGpsVerified: boolean;
-  lastUpdated: Timestamp | FieldValue;
-}
-
-/**
  * Fetches a student's complete attendance history for a specific class.
  * Uses a collection group query on the 'attendance' subcollection.
  *
@@ -553,6 +555,45 @@ export async function checkInToSession(
   );
 
   try {
+    // First check if the student already has an attendance record for this session
+    const existingAttendanceSnap = await getDoc(attendanceRef);
+    const isRejoining =
+      existingAttendanceSnap.exists() &&
+      existingAttendanceSnap.data().checkOutTime !== null;
+
+    if (isRejoining) {
+      console.log(`Student ${studentId} is rejoining session ${sessionId}`);
+      // Get the existing data to preserve verification status and duration
+      const existingData = existingAttendanceSnap.data();
+      const previousDuration = existingData.duration || 0;
+      const wasVerified = existingData.status === "verified";
+
+      console.log(`Previous duration: ${previousDuration} seconds`);
+      console.log(`Previously verified: ${wasVerified}`);
+
+      // Set the status correctly - either restore 'verified' or set to 'rejoined'
+      const newStatus = wasVerified ? "verified" : "rejoined";
+      console.log(`Setting status on rejoin to: ${newStatus}`);
+
+      // Update record with new check-in time, preserve duration, reset checkOutTime
+      await updateDoc(attendanceRef, {
+        checkInTime: serverTimestamp(),
+        checkInLocation: new GeoPoint(
+          locationData.latitude,
+          locationData.longitude
+        ),
+        checkOutTime: null, // Clear checkout time
+        status: newStatus, // Keep verified status if student was verified
+        lastUpdated: serverTimestamp(),
+      });
+
+      console.log(
+        `Successfully rejoined session for student ${studentId} with preserved duration of ${previousDuration} seconds and status: ${newStatus}`
+      );
+      return;
+    }
+
+    // Regular check-in flow for new attendance
     const sessionSnap = await getDoc(sessionRef);
     if (!sessionSnap.exists()) {
       console.error(`Session ${sessionId} not found.`);
@@ -598,6 +639,8 @@ export async function checkInToSession(
         locationData.latitude,
         locationData.longitude
       ),
+      checkOutTime: null,
+      duration: 0, // Initialize duration to 0 for new check-ins
       status: status,
       isGpsVerified: isGpsVerified,
       lastUpdated: serverTimestamp(),
@@ -642,12 +685,14 @@ export async function checkInToSession(
  *
  * @param sessionId The ID of the session to check out from.
  * @param studentId The ID of the student checking out.
+ * @param manualDuration Optional duration in seconds to override auto-calculation.
  * @returns A promise that resolves when the check-out is recorded.
  * @throws If the session does not exist or student is not checked in.
  */
 export async function checkOutFromSession(
   sessionId: string,
-  studentId: string
+  studentId: string,
+  manualDuration?: number
 ): Promise<void> {
   if (!sessionId || !studentId) {
     console.error("Session ID and Student ID are required.");
@@ -655,7 +700,11 @@ export async function checkOutFromSession(
   }
 
   console.log(
-    `Student ${studentId} attempting check-out for session ${sessionId}`
+    `Student ${studentId} attempting check-out for session ${sessionId}${
+      manualDuration !== undefined
+        ? ` with manual duration: ${manualDuration}s`
+        : ""
+    }`
   );
 
   const attendanceRef = doc(
@@ -673,8 +722,63 @@ export async function checkOutFromSession(
       throw new Error("Check-in record not found.");
     }
 
+    const attendanceData = attendanceSnap.data();
+    if (attendanceData.checkOutTime !== null) {
+      console.warn(
+        `Student ${studentId} has already checked out from session ${sessionId}.`
+      );
+      return;
+    }
+
+    let totalDuration = manualDuration;
+
+    // Only calculate duration if manual duration is not provided
+    if (totalDuration === undefined) {
+      // Calculate elapsed time since check-in
+      const checkInTime = attendanceData.checkInTime as Timestamp;
+      const now = Timestamp.now();
+      const elapsedSeconds = now.seconds - checkInTime.seconds;
+
+      // Add elapsed time to existing duration
+      const previousDuration = attendanceData.duration || 0;
+      totalDuration = previousDuration + elapsedSeconds;
+
+      console.log(
+        `Student ${studentId} checking out after ${elapsedSeconds} seconds`
+      );
+      console.log(`Previous duration: ${previousDuration} seconds`);
+    }
+
+    console.log(`Final total duration: ${totalDuration} seconds`);
+
+    // Determine the correct status based on current verification state
+    const currentStatus = attendanceData.status;
+    let newStatus: string;
+
+    if (currentStatus === "verified") {
+      // If the student was already verified, keep the verified status
+      console.log(
+        `Student was already verified, maintaining 'verified' status`
+      );
+      newStatus = "verified";
+    } else {
+      // If the student hasn't been verified yet, mark as checked out early before verification
+      console.log(
+        `Student checking out before verification, setting status to 'checked_out_early_before_verification'`
+      );
+      newStatus = "checked_out_early_before_verification";
+    }
+
+    // Update record with check-out time and accumulated duration
+    await updateDoc(attendanceRef, {
+      checkOutTime: Timestamp.now(),
+      duration: totalDuration,
+      status: newStatus,
+      lastUpdated: Timestamp.now(),
+    });
+
     console.log(
-      `Check-out process initiated/completed for student ${studentId} in session ${sessionId}.`
+      `Check-out completed for student ${studentId} in session ${sessionId}. Total duration: ${totalDuration} seconds. Status: ${newStatus}`
     );
   } catch (error) {
     console.error(

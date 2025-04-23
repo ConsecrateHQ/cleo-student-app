@@ -21,6 +21,9 @@ interface UseCheckInResult {
   handleCancelPress: () => void;
   resetCancellationState: () => void;
   clearPendingResult: () => void;
+  setPendingCheckResult: React.Dispatch<
+    React.SetStateAction<SessionCheckResult | null>
+  >;
 }
 
 export const useCheckIn = (): UseCheckInResult => {
@@ -247,6 +250,7 @@ export const useCheckIn = (): UseCheckInResult => {
           success: false,
           message: "Location check failed.",
           isAttending: false,
+          isRejoin: false,
         });
         if (stopAnimationFnRef.current) {
           stopAnimationFnRef.current("error");
@@ -327,5 +331,6 @@ export const useCheckIn = (): UseCheckInResult => {
     handleCancelPress,
     resetCancellationState,
     clearPendingResult,
+    setPendingCheckResult,
   };
 };

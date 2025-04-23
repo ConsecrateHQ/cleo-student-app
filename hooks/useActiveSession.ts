@@ -12,6 +12,8 @@ import {
   checkOutFromSession,
   getSessionStatus,
 } from "../utils/firebaseClassSessionHelpers";
+import { doc, getDoc } from "firebase/firestore";
+import { webDb } from "../utils/firebaseConfig";
 
 interface ActiveSessionState {
   isActive: boolean;
@@ -136,7 +138,7 @@ export const useActiveSession = (): UseActiveSessionResult => {
   const showActiveSessionElements = async (
     className: string,
     sessionId: string,
-    initialElapsedSeconds?: number
+    initialElapsedSeconds: number = 0
   ) => {
     console.log(
       "showActiveSessionElements called with:",
@@ -156,6 +158,9 @@ export const useActiveSession = (): UseActiveSessionResult => {
       return;
     }
 
+    // Get activeSessionInfo from store to check for duration
+    const activeSessionInfo = useAuthStore.getState().activeSessionInfo;
+
     // First check if the session is still active
     try {
       const sessionStatus = await getSessionStatus(sessionId);
@@ -170,6 +175,66 @@ export const useActiveSession = (): UseActiveSessionResult => {
             : "This session is not currently active."
         );
         return;
+      }
+
+      // Check for stored duration from activeSessionInfo (for app restart case)
+      if (
+        activeSessionInfo &&
+        activeSessionInfo.sessionId === sessionId &&
+        activeSessionInfo.duration !== undefined &&
+        activeSessionInfo.duration > 0
+      ) {
+        console.log(
+          `Found stored duration in activeSessionInfo: ${activeSessionInfo.duration} seconds`
+        );
+
+        // Use the stored duration in seconds
+        initialElapsedSeconds = activeSessionInfo.duration;
+        console.log(`Using stored duration: ${initialElapsedSeconds} seconds`);
+      }
+      // If no duration in activeSessionInfo, check if user is rejoining (for leave and rejoin case)
+      else if (user?.uid) {
+        try {
+          console.log(
+            "Checking if user is rejoining a session they left earlier"
+          );
+          const attendanceRef = doc(
+            webDb,
+            `sessions/${sessionId}/attendance/${user.uid}`
+          );
+          const attendanceSnap = await getDoc(attendanceRef);
+
+          if (attendanceSnap.exists()) {
+            const attendanceData = attendanceSnap.data();
+
+            // Check for duration field directly
+            if (
+              attendanceData.duration !== undefined &&
+              attendanceData.duration > 0
+            ) {
+              console.log(
+                `User is rejoining session with ${attendanceData.duration} seconds already accumulated`
+              );
+              initialElapsedSeconds = attendanceData.duration; // Use stored duration directly
+              console.log(
+                `Setting initial elapsed time to ${initialElapsedSeconds} seconds (${Math.floor(
+                  initialElapsedSeconds / 60
+                )} minutes)`
+              );
+            }
+            // Fallback to previous logic if duration not available but status is checked_out
+            else if (attendanceData.status === "checked_out") {
+              console.log(
+                `User has previously left session but no duration found. Using status to determine rejoin.`
+              );
+              // Default to 0 since we don't have actual duration
+              initialElapsedSeconds = 0;
+            }
+          }
+        } catch (error) {
+          console.error("Error checking previous attendance:", error);
+          // Continue anyway in case of error
+        }
       }
     } catch (error) {
       console.error("Error checking session status:", error);
@@ -339,6 +404,28 @@ export const useActiveSession = (): UseActiveSessionResult => {
               console.log("User confirmed leaving class early...");
               const sessionId = activeSession.sessionId; // Store for logging
 
+              // Get current accumulated time from active session in minutes
+              const currentMinutes = activeSession.timer;
+              const currentSeconds = currentMinutes * 60;
+
+              // Get any previous duration from store
+              const activeSessionInfo =
+                useAuthStore.getState().activeSessionInfo;
+              const previousDuration = activeSessionInfo?.duration || 0;
+
+              // Calculate total duration
+              const totalDuration = previousDuration + currentSeconds;
+
+              console.log(
+                `Current session time: ${currentMinutes} minutes (${currentSeconds} seconds)`
+              );
+              console.log(
+                `Previous stored duration: ${previousDuration} seconds`
+              );
+              console.log(
+                `Total duration to be saved: ${totalDuration} seconds`
+              );
+
               // Clear timer interval first using ref
               if (intervalRef.current) {
                 console.log("Clearing timer interval via ref");
@@ -384,17 +471,33 @@ export const useActiveSession = (): UseActiveSessionResult => {
 
               // Try to check out from the session after animations start
               try {
-                await checkOutFromSession(sessionId, user.uid);
-                console.log("Successfully checked out from Firebase");
+                // Call the updated checkOutFromSession which now tracks duration
+                console.log(
+                  "Calling checkOutFromSession to record duration and check-out time"
+                );
+
+                // Send the totalDuration as a parameter to checkOutFromSession so it can be saved
+                await checkOutFromSession(sessionId, user.uid, totalDuration);
+                console.log(
+                  "Successfully checked out from Firebase with duration tracking"
+                );
 
                 // Show confirmation after leaving
                 setTimeout(() => {
                   Alert.alert(
                     "Left Class",
-                    "Successfully left the class early."
+                    "Successfully left the class early. You can rejoin this session later if needed.",
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => {
+                          console.log("User acknowledged leave confirmation");
+                          // Always reset the leave in progress flag
+                          leaveInProgressRef.current = false;
+                        },
+                      },
+                    ]
                   );
-                  // Always reset the leave in progress flag
-                  leaveInProgressRef.current = false;
                 }, 500);
               } catch (checkoutError) {
                 console.error(

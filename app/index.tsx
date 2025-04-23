@@ -7,6 +7,7 @@ import {
   View,
   ActivityIndicator,
   Platform,
+  AppState,
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import BottomSheet from "@gorhom/bottom-sheet";
@@ -25,11 +26,21 @@ import { useCheckIn } from "../hooks/useCheckIn";
 import { useActiveSession } from "../hooks/useActiveSession";
 import { useSessionStatusListener } from "../hooks/useSessionStatusListener";
 import CongratulationsDrawer from "../components/CongratulationsDrawer";
-import { getClassDetails } from "../utils/firebaseClassSessionHelpers";
+import {
+  getClassDetails,
+  getActiveSessionsForStudent,
+  checkInToSession,
+} from "../utils/firebaseClassSessionHelpers";
 import { Timestamp } from "firebase/firestore";
 import * as Notifications from "expo-notifications";
 import * as LocalAuthentication from "expo-local-authentication";
 import { updateBiometricVerificationStatus } from "../utils/firebaseClassSessionHelpers";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { webDb } from "../utils/firebaseConfig";
+import { checkOutFromSession } from "../utils/firebaseClassSessionHelpers";
+import { useLocation } from "../hooks/useLocation";
+import { validateLocationForSession } from "../utils/locationHelpers";
+import { SessionCheckResult } from "../hooks/useClassSessionChecker";
 
 // --- Notification Handler Configuration ---
 Notifications.setNotificationHandler({
@@ -52,16 +63,17 @@ const App = () => {
   const setActiveSessionInStore = useAuthStore(
     (state) => state.setActiveSession
   );
-  const [isJoinModalVisible, setIsJoinModalVisible] = useState(false);
   const processedCheckRef = useRef<string | null>(null);
   const notificationListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
+  const autoCheckPerformedRef = useRef(false);
   // State to store the ID of the scheduled biometric verification notification
   const [biometricNotificationId, setBiometricNotificationId] = useState<
     string | null
   >(null);
 
   // Custom hooks
+  const { location } = useLocation();
   const {
     activeSession,
     animations: sessionAnimations,
@@ -92,7 +104,210 @@ const App = () => {
     handleCancelPress,
     resetCancellationState,
     clearPendingResult,
+    setPendingCheckResult,
   } = useCheckIn();
+
+  // Update checkForAvailableSessions
+  const checkForAvailableSessions = useCallback(async () => {
+    // Ensure user and location are available before checking
+    if (!user?.uid || !location || autoCheckPerformedRef.current) return;
+
+    console.log("Checking for available sessions automatically...");
+
+    // Don't proceed if already in an active session
+    if (activeSession.isActive || activeSessionInfo) {
+      console.log("User already has an active session, skipping auto-check");
+      autoCheckPerformedRef.current = true;
+      return;
+    }
+
+    try {
+      // Get active sessions for the student
+      const activeSessions = await getActiveSessionsForStudent(user.uid);
+
+      if (activeSessions.length > 0) {
+        // Check each active session to find one within 50 meters
+        for (const session of activeSessions) {
+          // Skip sessions without location data
+          if (!session.location) continue;
+
+          // Check if user is within 50 meters of the session location
+          const userLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          };
+
+          const isWithinRadius = validateLocationForSession(
+            session.location,
+            userLocation,
+            50 // 50 meters radius as specified
+          );
+
+          if (isWithinRadius) {
+            console.log(
+              `User is within 50m of session ${session.sessionId}, getting class details`
+            );
+
+            // Get class details
+            const classDetails = await getClassDetails(session.classId);
+
+            if (classDetails) {
+              console.log(
+                `Found nearby session for class: ${classDetails.name}`
+              );
+
+              // --- Check if this is a rejoin scenario ---
+              let isRejoining = false;
+              try {
+                const attendanceRef = doc(
+                  webDb,
+                  `sessions/${session.sessionId}/attendance/${user.uid}`
+                );
+                const attendanceSnap = await getDoc(attendanceRef);
+                if (
+                  attendanceSnap.exists() &&
+                  attendanceSnap.data().checkOutTime !== null
+                ) {
+                  console.log(
+                    `User has previously checked out from session ${session.sessionId}. This is a rejoin.`
+                  );
+                  isRejoining = true;
+                }
+              } catch (error) {
+                console.error("Error checking rejoin status:", error);
+                // Continue even if check fails, default to not rejoining
+              }
+              // ------------------------------------------
+
+              // --- Define the join logic directly in onPress ---
+              const joinSessionFromAlert = async () => {
+                try {
+                  console.log(
+                    `Alert ${
+                      isRejoining ? "Rejoin" : "Join"
+                    }: Joining session ${session.sessionId} for class: ${
+                      classDetails.name
+                    }`
+                  );
+
+                  // Explicitly call checkInToSession
+                  await checkInToSession(
+                    session.sessionId,
+                    user.uid,
+                    userLocation
+                  );
+                  console.log(
+                    `Alert ${
+                      isRejoining ? "Rejoin" : "Join"
+                    }: Successfully recorded check-in for session ${
+                      session.sessionId
+                    }`
+                  );
+
+                  // Create the successful check result, setting isRejoin correctly
+                  const successfulCheckResult: SessionCheckResult = {
+                    success: true,
+                    message: `Student is attending ${classDetails.name}.`,
+                    isAttending: true,
+                    sessionId: session.sessionId,
+                    classId: session.classId,
+                    isRejoin: isRejoining, // <-- Use the determined flag
+                  };
+
+                  // Clear previous state and set the new result
+                  clearPendingResult();
+                  resetCancellationState();
+                  setPendingCheckResult(successfulCheckResult);
+
+                  console.log(
+                    `Alert ${
+                      isRejoining ? "Rejoin" : "Join"
+                    }: Triggered session join via check-in flow by setting pendingCheckResult`
+                  );
+                } catch (error) {
+                  console.error(
+                    `Error ${
+                      isRejoining ? "rejoining" : "joining"
+                    } session from Alert onPress:`,
+                    error
+                  );
+                  Alert.alert(
+                    "Error",
+                    `Could not ${isRejoining ? "rejoin" : "join"} session: ${
+                      error instanceof Error ? error.message : "Unknown error"
+                    }`
+                  );
+                }
+              };
+              // --------------------------------------------------
+
+              // Customize alert based on rejoin status
+              const alertTitle = isRejoining
+                ? "Rejoin Class Session?"
+                : "Class Session Available";
+              const alertMessage = isRejoining
+                ? `The session for ${classDetails.name} is still active. Would you like to rejoin?`
+                : `There is an active session for ${classDetails.name}. Would you like to join?`;
+              const joinButtonText = isRejoining ? "Rejoin" : "Join";
+
+              // Show native alert with the inline join logic
+              Alert.alert(alertTitle, alertMessage, [
+                {
+                  text: "Not Now",
+                  style: "cancel",
+                },
+                {
+                  text: joinButtonText,
+                  onPress: joinSessionFromAlert, // Use the inline function
+                },
+              ]);
+
+              // Found a valid session, no need to check others
+              break;
+            }
+          } else {
+            console.log(
+              `User is not within 50m radius of session ${session.sessionId}`
+            );
+          }
+        }
+      } else {
+        console.log("No active sessions available");
+      }
+    } catch (error) {
+      console.error("Error checking for available sessions:", error);
+    } finally {
+      autoCheckPerformedRef.current = true;
+    }
+  }, [
+    user?.uid,
+    location,
+    activeSession.isActive,
+    activeSessionInfo,
+    // Include check-in functions needed by the inline onPress handler
+    clearPendingResult,
+    resetCancellationState,
+    setPendingCheckResult,
+    // checkInToSession is stable, no need to list
+    // getClassDetails is stable, no need to list
+  ]);
+
+  // Check for available sessions when app loads
+  useEffect(() => {
+    // Don't check if already in a session or if check already performed
+    if (
+      !activeSession.isActive &&
+      !isRestoringSession &&
+      !autoCheckPerformedRef.current
+    ) {
+      checkForAvailableSessions();
+    }
+  }, [
+    user,
+    activeSession.isActive,
+    isRestoringSession,
+    checkForAvailableSessions,
+  ]);
 
   const {
     animatedTitleStyle,
@@ -425,8 +640,43 @@ const App = () => {
       (async () => {
         try {
           console.log("Showing active session elements...");
+
+          // The showActiveSessionElements function will now check if the student
+          // is rejoining and load the correct duration if needed
           await showActiveSessionElements(className, sessionIdMatch);
           console.log("Active session state updated successfully");
+
+          // Check if this is a rejoin by looking at the attendance record
+          let isRejoin = false;
+          let storedDuration = 0;
+          let wasVerified = false;
+          try {
+            const attendanceRef = doc(
+              webDb,
+              `sessions/${sessionIdMatch}/attendance/${currentUserId}`
+            );
+            const attendanceDoc = await getDoc(attendanceRef);
+
+            if (attendanceDoc.exists()) {
+              const attendanceData = attendanceDoc.data();
+              // Check if this is a rejoin (has check-out time and status is appropriate)
+              if (attendanceData.checkOutTime !== null) {
+                isRejoin = true;
+                console.log("User is rejoining an existing session");
+                // Get the stored duration if available
+                storedDuration = attendanceData.duration || 0;
+                console.log(
+                  `Retrieved stored duration: ${storedDuration} seconds`
+                );
+
+                // Check if the user was previously verified
+                wasVerified = attendanceData.status === "verified";
+                console.log(`User was previously verified: ${wasVerified}`);
+              }
+            }
+          } catch (error) {
+            console.error("Error checking rejoin status:", error);
+          }
 
           // *** FIX: Update activeSessionInfo in the store ***
           const now = Timestamp.now();
@@ -435,53 +685,67 @@ const App = () => {
             classId: classIdMatch,
             checkInTime: now,
             lastUpdated: now,
-            joinTimestamp: Date.now(),
+            joinTimestamp: isRejoin
+              ? // For rejoins, use existing timestamp to maintain continuous duration
+                activeSessionInfo?.joinTimestamp || Date.now()
+              : // For new joins, use current time
+                Date.now(),
+            isRejoin: isRejoin,
+            duration: storedDuration, // Add the duration field
+            wasVerified: wasVerified, // Track if user was previously verified
           });
-          console.log("Active session info saved to store.");
+          console.log(
+            `Active session info saved to store. isRejoin: ${isRejoin}, duration: ${storedDuration}s, wasVerified: ${wasVerified}`
+          );
 
           // --- Schedule Biometric Verification Notification ---
-          // Cancel any potentially existing notification first
-          await cancelBiometricNotification();
+          // Only schedule verification for new check-ins, not rejoins
+          if (!isRejoin) {
+            // Cancel any potentially existing notification first
+            await cancelBiometricNotification();
 
-          const notificationDelaySeconds = 10; // TODO: Change to 30 * 60 for production
-          console.log(
-            `Scheduling biometric verification notification for session ${sessionIdMatch} in ${notificationDelaySeconds} seconds.`
-          );
-          const scheduleTime = new Date();
-          console.log(
-            `Scheduling initiated at: ${scheduleTime.toLocaleTimeString()}`
-          );
-
-          try {
-            const notificationId =
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title: `Verify Attendance: ${className}`,
-                  body: "Tap here to verify your presence with biometrics.",
-                  data: {
-                    action: "VERIFY_BIOMETRIC", // Custom action identifier
-                    sessionId: sessionIdMatch,
-                    classId: classIdMatch,
-                    studentId: currentUserId, // Pass student ID
-                  },
-                },
-                trigger: {
-                  type: Notifications.SchedulableTriggerInputTypes
-                    .TIME_INTERVAL,
-                  seconds: notificationDelaySeconds,
-                },
-              });
+            const notificationDelaySeconds = 10; // TODO: Change to 30 * 60 for production
             console.log(
-              "Notification scheduled successfully with ID:",
-              notificationId
+              `Scheduling biometric verification notification for session ${sessionIdMatch} in ${notificationDelaySeconds} seconds.`
             );
-            setBiometricNotificationId(notificationId); // Store the ID
-          } catch (error) {
-            console.error("Error scheduling notification:", error);
-            Alert.alert(
-              "Notification Error",
-              "Could not schedule the verification reminder."
+            const scheduleTime = new Date();
+            console.log(
+              `Scheduling initiated at: ${scheduleTime.toLocaleTimeString()}`
             );
+
+            try {
+              const notificationId =
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: `Verify Attendance: ${className}`,
+                    body: "Tap here to verify your presence with biometrics.",
+                    data: {
+                      action: "VERIFY_BIOMETRIC", // Custom action identifier
+                      sessionId: sessionIdMatch,
+                      classId: classIdMatch,
+                      studentId: currentUserId, // Pass student ID
+                    },
+                  },
+                  trigger: {
+                    type: Notifications.SchedulableTriggerInputTypes
+                      .TIME_INTERVAL,
+                    seconds: notificationDelaySeconds,
+                  },
+                });
+              console.log(
+                "Notification scheduled successfully with ID:",
+                notificationId
+              );
+              setBiometricNotificationId(notificationId); // Store the ID
+            } catch (error) {
+              console.error("Error scheduling notification:", error);
+              Alert.alert(
+                "Notification Error",
+                "Could not schedule the verification reminder."
+              );
+            }
+          } else {
+            console.log("Skipping biometric verification for rejoin");
           }
           // -----------------------------------------------------
 
@@ -526,6 +790,8 @@ const App = () => {
     user,
     clearPendingResult,
     cancelBiometricNotification,
+    activeSessionInfo,
+    webDb,
   ]);
 
   // Effect to handle restoration of session from store
@@ -654,6 +920,92 @@ const App = () => {
       cancelBiometricNotification(); // Use the cancel function
     };
   }, [cancelBiometricNotification]); // Depend on the cancel function
+
+  // Effect to handle app state changes (foreground, background, inactive)
+  useEffect(() => {
+    const appStateSubscription = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        // We're interested in when the app goes to background
+        if (nextAppState === "background" || nextAppState === "inactive") {
+          // Only proceed if there's an active session
+          if (activeSession.isActive && activeSession.sessionId && user?.uid) {
+            const sessionId = activeSession.sessionId;
+            console.log(
+              `App going to background with active session ${sessionId}. Saving duration...`
+            );
+
+            // Calculate the current session duration
+            const currentMinutes = activeSession.timer;
+            const currentSeconds = currentMinutes * 60;
+
+            // Get any previous duration from store
+            const storedDuration = activeSessionInfo?.duration || 0;
+
+            // Calculate total duration
+            const totalDuration = storedDuration + currentSeconds;
+
+            console.log(
+              `Current session time: ${currentMinutes} minutes (${currentSeconds} seconds)`
+            );
+            console.log(`Previous stored duration: ${storedDuration} seconds`);
+            console.log(`Total duration to save: ${totalDuration} seconds`);
+
+            // Get wasVerified flag from active session info
+            const wasVerified = activeSessionInfo?.wasVerified || false;
+            console.log(`Was verified flag from store: ${wasVerified}`);
+
+            // Update the duration in Firebase directly
+            try {
+              // This is an async operation, but since the app is going to background
+              // we can't reliably await it. We'll have to hope it completes.
+              const attendanceRef = doc(
+                webDb,
+                `sessions/${sessionId}/attendance/${user.uid}`
+              );
+              updateDoc(attendanceRef, {
+                duration: totalDuration,
+                lastUpdated: Timestamp.now(),
+              })
+                .then(() => {
+                  console.log(
+                    `Successfully updated duration to ${totalDuration}s in Firebase while app going to background`
+                  );
+                })
+                .catch((error) => {
+                  console.error(
+                    "Error updating duration on app background:",
+                    error
+                  );
+                });
+
+              // Also update the duration in the store
+              if (activeSessionInfo) {
+                setActiveSessionInStore({
+                  ...activeSessionInfo,
+                  duration: totalDuration,
+                  lastUpdated: Timestamp.now(),
+                  wasVerified: wasVerified, // Preserve the verified status
+                });
+                console.log(
+                  `Updated duration in store to ${totalDuration}s with wasVerified: ${wasVerified}`
+                );
+              }
+            } catch (error) {
+              console.error(
+                "Error setting up duration update on app background:",
+                error
+              );
+            }
+          }
+        }
+      }
+    );
+
+    return () => {
+      appStateSubscription.remove();
+    };
+  }, [activeSession, user, activeSessionInfo, setActiveSessionInStore]);
 
   console.log("Is DEV mode?", __DEV__);
 
